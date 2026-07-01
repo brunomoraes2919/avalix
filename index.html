@@ -1416,16 +1416,25 @@ function _supaFetch(path, opts) {
 
 /* Puxa dados do Supabase → localStorage. Chamado 1x no boot. */
 function _supaPull() {
+  var temLocal = !!localStorage.getItem(DB_KEY);
+  if (temLocal) {
+    /* Já temos dados locais → apenas envia para o Supabase (não sobrescreve) */
+    _supaSchedule();
+    return;
+  }
+  /* localStorage vazio (novo usuário/browser) → tenta buscar dados compartilhados */
   _supaFetch('/rest/v1/avaliaclin_dados?id=eq.principal&select=dados', { cache: 'no-store' })
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(rows) {
       if (rows && rows[0] && rows[0].dados) {
         localStorage.setItem(DB_KEY, JSON.stringify(rows[0].dados));
-        /* Atualiza UI suavemente se ainda na tela de login */
         try { if (typeof refreshLoginStats === 'function') refreshLoginStats(); } catch(e) {}
+      } else {
+        /* Supabase vazio → envia o seed local para compartilhar */
+        _supaSchedule();
       }
     })
-    .catch(function() {}); /* offline — ignora silenciosamente */
+    .catch(function() {});
 }
 
 /* Envia localStorage → Supabase. Chamado após cada db_save (debounce 2s). */
