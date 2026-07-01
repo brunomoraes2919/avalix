@@ -4941,7 +4941,19 @@ function pode(acao) {
     /* Professores só veem as matérias onde estão vinculados */
     const _todasMaterias = materias_list();
     const materias = isProfCfg
-      ? _todasMaterias.filter(m => (m.supervisores || []).includes(session_cfg.id))
+      ? _todasMaterias.filter(m => {
+          // Vinculado explicitamente como professor da matéria
+          if ((m.supervisores || []).includes(session_cfg.id)) return true;
+          // OU tem ficha como supervisor num cenário dessa matéria
+          const cenIds = (m.cenarios || []).map(mc => mc.cenarioId);
+          return (typeof avaliacoes_list === 'function') && avaliacoes_list().some(a =>
+            cenIds.includes(a.cenarioId) && (
+              a.supervisorPrincipalId === session_cfg.id ||
+              (Array.isArray(a.supervisoresCompartilhadosIds) &&
+               a.supervisoresCompartilhadosIds.includes(session_cfg.id))
+            )
+          );
+        })
       : _todasMaterias;
     const cenarios  = cenarios_list();
     const usuarios  = (typeof users_list === 'function') ? users_list() : [];
@@ -5009,7 +5021,7 @@ function pode(acao) {
               Uma matéria agrupa cenários de estágio. A nota final da matéria é a média ponderada dos cenários — os pesos devem somar 100%.
             </p>
           </div>
-          <button class="btn btn-accent btn-sm" id="btnNovaMateria"><i class="ti ti-plus"></i> Nova matéria</button>
+          ${!isProfCfg ? '<button class="btn btn-accent btn-sm" id="btnNovaMateria"><i class="ti ti-plus"></i> Nova matéria</button>' : ''}
         </div>
 
         ${materias.length === 0 ? `
@@ -5106,6 +5118,13 @@ function pode(acao) {
             if (items.length > 0) items[items.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
           }, 80);
         }
+      });
+    }
+
+    /* Professor só pode ver e vincular alunos — não edita estrutura da matéria */
+    if (isProfCfg) {
+      card.querySelectorAll('[data-mat-act="excluir"], .mat-btn-edit, .mat-btn-save, .mat-btn-salvar-pesos, [data-mat-act="remover-cen"], .mat-btn-add-cen, .mat-sup-select, .mat-sup-remove').forEach(el => {
+        el.style.display = 'none';
       });
     }
 
