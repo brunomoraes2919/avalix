@@ -4991,10 +4991,16 @@ function pode(acao) {
       const dispProfs = profs.filter(p => !sups.includes(p.id));
       const supHtml = sups.map(sid => {
         const u = usuarios.find(x => x.id === sid);
-        return u ? `<span class="badge badge-neutral" style="gap:.3rem;padding:.2rem .55rem .2rem .45rem;">
+        if (!u) return '';
+        /* Professor não pode remover a si mesmo — só admin pode */
+        const podeRemover = !isProfCfg || (session_cfg && session_cfg.id !== sid);
+        return `<span class="badge badge-neutral" style="gap:.3rem;padding:.2rem .55rem .2rem .45rem;">
           <i class="ti ti-user" style="font-size:11px;"></i>${escapeHtml(u.nome)}
-          <button class="btn-inline-x mat-sup-remove" data-mat-id="${m.id}" data-uid="${sid}" title="Remover" style="background:none;border:none;cursor:pointer;color:inherit;padding:0 0 0 2px;font-size:12px;line-height:1;">×</button>
-        </span>` : '';
+          ${podeRemover
+            ? `<button class="btn-inline-x mat-sup-remove" data-mat-id="${m.id}" data-uid="${sid}" title="Remover" style="background:none;border:none;cursor:pointer;color:inherit;padding:0 0 0 2px;font-size:12px;line-height:1;">×</button>`
+            : `<span title="Somente o administrador pode remover este vínculo" style="font-size:10px;opacity:.5;padding-left:3px;">🔒</span>`
+          }
+        </span>`;
       }).join('');
       const addSel = dispProfs.length
         ? `<select class="mat-sup-select" data-mat-id="${m.id}" style="font-size:12.5px;padding:3px 6px;border-radius:6px;">
@@ -5021,7 +5027,7 @@ function pode(acao) {
               Uma matéria agrupa cenários de estágio. A nota final da matéria é a média ponderada dos cenários — os pesos devem somar 100%.
             </p>
           </div>
-          ${!isProfCfg ? '<button class="btn btn-accent btn-sm" id="btnNovaMateria"><i class="ti ti-plus"></i> Nova matéria</button>' : ''}
+          <button class="btn btn-accent btn-sm" id="btnNovaMateria"><i class="ti ti-plus"></i> Nova matéria</button>
         </div>
 
         ${materias.length === 0 ? `
@@ -5110,8 +5116,11 @@ function pode(acao) {
       btnNova.addEventListener('click', () => {
         const res = materia_create('Nova matéria');
         if (res.ok) {
+          /* Professor criou → auto-adicionar como supervisor da nova matéria */
+          if (isProfCfg && session_cfg && session_cfg.id) {
+            materia_update(res.materia.id, { supervisores: [session_cfg.id] });
+          }
           renderMateriasCard(outerContainer);
-          // Mostrar feedback e rolar até a nova matéria (última da lista)
           if (window.showToast) showToast('Matéria criada! Configure o nome, adicione cenários e professores.', 'success');
           setTimeout(() => {
             const items = card.querySelectorAll('.materia-item');
@@ -5121,12 +5130,6 @@ function pode(acao) {
       });
     }
 
-    /* Professor só pode ver e vincular alunos — não edita estrutura da matéria */
-    if (isProfCfg) {
-      card.querySelectorAll('[data-mat-act="excluir"], .mat-btn-edit, .mat-btn-save, .mat-btn-salvar-pesos, [data-mat-act="remover-cen"], .mat-btn-add-cen, .mat-sup-select, .mat-sup-remove').forEach(el => {
-        el.style.display = 'none';
-      });
-    }
 
     card.querySelectorAll('[data-mat-act="excluir"]').forEach(btn => {
       btn.addEventListener('click', () => {
