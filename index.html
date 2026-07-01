@@ -1396,7 +1396,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
    API real sem alterar o resto do app.
    ============================================================ */
 
-const DB_KEY = 'avaliaclin_db_v3';
+const DB_KEY = 'avaliaclin_db_v4';
 
 /* ── Supabase (sync em background, nunca bloqueia o app) ──── */
 var _supa = {
@@ -1416,9 +1416,19 @@ function _supaFetch(path, opts) {
 
 /* Puxa dados do Supabase → localStorage. Chamado 1x no boot. */
 function _supaPull() {
-  var temLocal = !!localStorage.getItem(DB_KEY);
-  if (temLocal) {
-    /* Já temos dados locais → apenas envia para o Supabase (não sobrescreve) */
+  var raw = localStorage.getItem(DB_KEY);
+  if (raw) {
+    /* Já temos dados locais — verificar se estão completos */
+    try {
+      var local = JSON.parse(raw);
+      /* Se dados locais estão incompletos (vindo de sessão quebrada), resetar o seed */
+      if (!local || !local.alunos || local.alunos.length < 3 || !local.config || !local.config.cenarios || local.config.cenarios.length < 2) {
+        localStorage.removeItem(DB_KEY);
+        /* Seed será recriado pelo db_load na próxima chamada */
+        if (typeof db_load === 'function') db_load();
+      }
+    } catch(e) { localStorage.removeItem(DB_KEY); }
+    /* Enviar dados locais para o Supabase (sempre sincroniza na abertura) */
     _supaSchedule();
     return;
   }
@@ -2136,7 +2146,7 @@ function db_migrate(data) {
 /* ---------- Acesso ao "banco" ---------- */
 function db_load() {
   // Limpar chave antiga se existir (migração da v1 para v2)
-  try { ['avaliaclin_db_v1','avaliaclin_db_v2'].forEach(k => { if(localStorage.getItem(k)) localStorage.removeItem(k); }); } catch(e) {}
+  try { ['avaliaclin_db_v1','avaliaclin_db_v2','avaliaclin_db_v3'].forEach(k => localStorage.removeItem(k)); } catch(e) {}
   let raw = localStorage.getItem(DB_KEY);
   if (!raw) {
     const seed = buildSeed();
