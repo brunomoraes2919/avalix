@@ -1396,7 +1396,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
    API real sem alterar o resto do app.
    ============================================================ */
 
-const DB_KEY = 'avaliaclin_db_v4';
+const DB_KEY = 'avaliaclin_db_v5';
 
 /* ── Supabase (sync em background, nunca bloqueia o app) ──── */
 var _supa = {
@@ -1744,6 +1744,7 @@ function buildSeed() {
           id: matCardioTOId,
           nome: 'Fisioterapia Cardiorrespiratória e T.O.',
           supervisores: [sabrinaId, iagoId],
+          alunos: [aJoaoId, aMariaId, aLucasId, aRafaelId],
           cenarios: [
             { cenarioId: cenCardioId, peso: 0.5 },
             { cenarioId: cenTOId,     peso: 0.5 }
@@ -1753,6 +1754,7 @@ function buildSeed() {
           id: matNeuroOrtId,
           nome: 'Neurologia e Ortopedia',
           supervisores: [camilaId],
+          alunos: [aCarinaId, aFernandaId],
           cenarios: [
             { cenarioId: cenNeuroId, peso: 0.6 },
             { cenarioId: cenOrtopId, peso: 0.4 }
@@ -2190,13 +2192,21 @@ function db_migrate(data) {
     });
     data.version = 13; changed = true;
   }
+
+  // v14 — campo alunos[] nas matérias (vínculo de alunos por matéria)
+  if (data.version < 14) {
+    (data.config.materias || []).forEach(m => {
+      if (!Array.isArray(m.alunos)) m.alunos = [];
+    });
+    data.version = 14; changed = true;
+  }
   return changed;
 }
 
 /* ---------- Acesso ao "banco" ---------- */
 function db_load() {
   // Limpar chave antiga se existir (migração da v1 para v2)
-  try { ['avaliaclin_db_v1','avaliaclin_db_v2','avaliaclin_db_v3'].forEach(k => localStorage.removeItem(k)); } catch(e) {}
+  try { ['avaliaclin_db_v1','avaliaclin_db_v2','avaliaclin_db_v3','avaliaclin_db_v4'].forEach(k => localStorage.removeItem(k)); } catch(e) {}
   let raw = localStorage.getItem(DB_KEY);
   if (!raw) {
     const seed = buildSeed();
@@ -2939,7 +2949,7 @@ function materia_get(id) {
 function materia_create(nome) {
   const db = db_load();
   if (!db.config.materias) db.config.materias = [];
-  const nova = { id: uid('mat'), nome: nome.trim(), cenarios: [], supervisores: [] };
+  const nova = { id: uid('mat'), nome: nome.trim(), cenarios: [], supervisores: [], alunos: [] };
   db.config.materias.push(nova);
   db_save(db);
   logAction('Matéria criada: ' + nova.nome);
@@ -2954,6 +2964,7 @@ function materia_update(id, payload) {
   if (payload.nome        !== undefined) m.nome        = String(payload.nome).trim();
   if (payload.cenarios    !== undefined) m.cenarios    = payload.cenarios;
   if (payload.supervisores !== undefined) m.supervisores = payload.supervisores;
+  if (payload.alunos       !== undefined) m.alunos       = payload.alunos;
   db_save(db);
   logAction('Matéria atualizada: ' + m.nome);
   /* Notificar professores recém-adicionados à matéria */
@@ -3875,7 +3886,6 @@ function pode(acao) {
                 <th>Aluno(a)</th>
                 <th>Matrícula</th>
                 <th>Turma</th>
-                <th>Supervisor padrão</th>
                 <th>Avaliações</th>
                 <th>Status</th>
                 <th style="text-align:right;">Ações</th>
@@ -3984,7 +3994,6 @@ function pode(acao) {
           </td>
           <td class="mono" style="color:var(--ac-charcoal-soft);">${escapeHtml(a.matricula || '—')}</td>
           <td>${escapeHtml(aluno_turmaNome(a))}</td>
-          <td style="color:var(--ac-charcoal-soft);">${escapeHtml((users_get(a.supervisorPadraoId) || {}).nome || '—')}</td>
           <td>
             <span class="badge badge-neutral">${qtdAval} ${qtdAval === 1 ? 'ficha' : 'fichas'}</span>
           </td>
@@ -4084,14 +4093,7 @@ function pode(acao) {
                 </select>
                 ${turmas_list().length === 0 ? '<div class="field-hint">Nenhuma turma cadastrada ainda — cadastre em "Turmas".</div>' : ''}
               </div>
-              <div class="field">
-                <label for="a-supervisor">Supervisor padrão</label>
-                <select id="a-supervisor" ${readOnly ? 'disabled' : ''}>
-                  <option value="">Selecione um professor (opcional)</option>
-                  ${professores_list().map(p => `<option value="${p.id}" ${editing && aluno.supervisorPadraoId === p.id ? 'selected' : ''}>${escapeHtml(p.nome)}</option>`).join('')}
-                </select>
-                ${professores_list().length === 0 ? '<div class="field-hint">Nenhum professor cadastrado ainda — cadastre um em "Usuários".</div>' : ''}
-              </div>
+
             </div>
 
             <div class="field-row">
@@ -4147,7 +4149,6 @@ function pode(acao) {
       const nome = $('#a-nome', overlay).value.trim();
       const matricula = $('#a-matricula', overlay).value.trim();
       const turmaId = $('#a-turma', overlay).value || null;
-      const supervisorPadraoId = $('#a-supervisor', overlay).value || null;
       const email = $('#a-email', overlay).value.trim();
       const telefone = $('#a-telefone', overlay).value.trim();
       const observacoes = $('#a-obs', overlay).value.trim();
@@ -4156,7 +4157,7 @@ function pode(acao) {
       if (!nome) { $('#f-a-nome', overlay).classList.add('has-error'); valid = false; }
       if (!valid) return;
 
-      const payload = { nome, matricula, turmaId, supervisorPadraoId, email, telefone, observacoes };
+      const payload = { nome, matricula, turmaId, email, telefone, observacoes };
       const res = editing ? alunos_update(alunoId, payload) : alunos_create(payload);
       if (!res.ok) { showModalAlert(res.msg); return; }
 
@@ -4946,7 +4947,34 @@ function pode(acao) {
     const usuarios  = (typeof users_list === 'function') ? users_list() : [];
     const profs     = usuarios.filter(u => u.papel === 'professor' || u.papel === 'admin');
 
-    function htmlSupSection(m) {
+    function htmlAlunosSection(m) {
+      const todosAlunos = (typeof alunos_list === 'function') ? alunos_list().filter(a => a.ativo) : [];
+      const vinculados = (m.alunos || []);
+      const dispAlunos = todosAlunos.filter(a => !vinculados.includes(a.id));
+      const vinHtml = vinculados.map(aid => {
+        const a = todosAlunos.find(x => x.id === aid) || { id: aid, nome: aid };
+        return `<span class="badge badge-neutral" style="gap:.3rem;padding:.2rem .55rem .2rem .45rem;">
+          <i class="ti ti-user-check" style="font-size:11px;"></i>${escapeHtml(a.nome)}
+          <button class="mat-aluno-remove" data-mat-id="${m.id}" data-uid="${aid}" title="Desvincular" style="background:none;border:none;cursor:pointer;color:inherit;padding:0 0 0 2px;font-size:12px;line-height:1;">×</button>
+        </span>`;
+      }).join('');
+      const addSel = dispAlunos.length
+        ? `<select class="mat-aluno-select" data-mat-id="${m.id}" style="font-size:12.5px;padding:3px 6px;border-radius:6px;">
+            <option value="">+ Vincular aluno(a)…</option>
+            ${dispAlunos.map(a => `<option value="${a.id}">${escapeHtml(a.nome)}</option>`).join('')}
+          </select>`
+        : '<span style="font-size:12px;color:var(--ac-charcoal-soft);">Todos os alunos já vinculados.</span>';
+      return `
+        <div style="border-top:1px solid var(--ac-line);padding:.65rem 1.1rem .75rem;">
+          <div style="font-size:12px;font-weight:700;color:var(--ac-charcoal-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.5rem;">Alunos vinculados a esta matéria</div>
+          <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.5rem;min-height:22px;">
+            ${vinHtml || '<span style="font-size:12.5px;color:var(--ac-charcoal-soft);">Nenhum aluno vinculado ainda.</span>'}
+          </div>
+          ${addSel}
+        </div>`;
+    }
+
+        function htmlSupSection(m) {
       const sups = (m.supervisores || []);
       const dispProfs = profs.filter(p => !sups.includes(p.id));
       const supHtml = sups.map(sid => {
@@ -5056,6 +5084,8 @@ function pode(acao) {
             </div>
             <!-- Professores da matéria -->
             ${htmlSupSection(m)}
+            <!-- Alunos vinculados -->
+            ${htmlAlunosSection(m)}
           </div>
           `;
         }).join('')}
@@ -5187,6 +5217,32 @@ function pode(acao) {
         if (!mat) return;
         const novaSups = (mat.supervisores || []).filter(s => s !== btn.dataset.uid);
         materia_update(btn.dataset.matId, { supervisores: novaSups });
+        renderMateriasCard(outerContainer);
+      });
+    });
+
+    // Vincular aluno à matéria
+    card.querySelectorAll('.mat-aluno-select').forEach(sel => {
+      sel.addEventListener('change', function () {
+        const aid = this.value;
+        if (!aid) return;
+        const matId = this.dataset.matId;
+        const mat   = materia_get(matId);
+        if (!mat) return;
+        const novaLista = [...(mat.alunos || [])];
+        if (!novaLista.includes(aid)) novaLista.push(aid);
+        materia_update(matId, { alunos: novaLista });
+        renderMateriasCard(outerContainer);
+      });
+    });
+
+    // Desvincular aluno da matéria
+    card.querySelectorAll('.mat-aluno-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mat = materia_get(btn.dataset.matId);
+        if (!mat) return;
+        const novaLista = (mat.alunos || []).filter(a => a !== btn.dataset.uid);
+        materia_update(btn.dataset.matId, { alunos: novaLista });
         renderMateriasCard(outerContainer);
       });
     });
@@ -6644,6 +6700,15 @@ function pode(acao) {
             <div class="field-hint">A nota final de APTO/INAPTO é calculada pela média ponderada de todos os cenários da matéria.</div>
           </div>
 
+          <!-- Aluno (filtrado pela matéria) -->
+          <div class="field" id="f-nf-aluno">
+            <label for="nf-aluno">Aluno(a)</label>
+            <select id="nf-aluno" disabled>
+              <option value="">Selecione primeiro a matéria</option>
+            </select>
+            <div class="field-error">Selecione um(a) aluno(a).</div>
+          </div>
+
           <!-- Cenário (filtrado pela matéria escolhida) -->
           <div class="field" id="f-nf-cenario">
             <label for="nf-cenario">Cenário <span style="font-size:12px;color:var(--ac-charcoal-soft);">(dentro da matéria)</span></label>
@@ -6671,21 +6736,43 @@ function pode(acao) {
       maxShared: isProfessor ? 1 : null
     });
 
-    // Ao selecionar aluno → sugerir supervisor padrão
+    // Ao selecionar aluno → sugerir supervisor
     $('#nf-aluno', overlay).addEventListener('change', function () {
       const aluno = alunos_get(this.value);
       if (aluno && aluno.supervisorPadraoId) picker.setPrincipalIfEmpty(aluno.supervisorPadraoId);
     });
 
-    // Ao selecionar matéria → popular cenários filtrados
+    // Ao selecionar matéria → filtrar alunos + popular cenários
     $('#nf-materia', overlay).addEventListener('change', function () {
       const matId = this.value;
-      const cenSel = $('#nf-cenario', overlay);
+      const cenSel   = $('#nf-cenario', overlay);
+      const alunoSel = $('#nf-aluno', overlay);
       cenSel.innerHTML = '<option value="">Selecione um cenário</option>';
-      if (!matId) { cenSel.disabled = true; return; }
+      cenSel.disabled = true;
+
+      // Resetar seleção de aluno
+      const alunoAntes = alunoSel.value;
+      alunoSel.innerHTML = '<option value="">Selecione um(a) aluno(a)</option>';
+
+      if (!matId) return;
 
       const mat = materias.find(m => m.id === matId);
-      const censDaMateria = (mat ? mat.cenarios : [])
+      if (!mat) return;
+
+      // Filtrar alunos vinculados à matéria (se houver vínculo)
+      const alunosVinculados = mat.alunos && mat.alunos.length > 0
+        ? alunosAtivos.filter(a => mat.alunos.includes(a.id))
+        : alunosAtivos; // sem vínculo = mostra todos
+      alunosVinculados.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = a.nome;
+        if (a.id === alunoAntes) opt.selected = true;
+        alunoSel.appendChild(opt);
+      });
+
+      // Popular cenários da matéria
+      const censDaMateria = (mat.cenarios || [])
         .map(mc => cenariosDisponiveis.find(c => c.id === mc.cenarioId))
         .filter(Boolean);
 
@@ -6697,7 +6784,13 @@ function pode(acao) {
       });
 
       cenSel.disabled = censDaMateria.length === 0;
-      if (censDaMateria.length === 1) cenSel.value = censDaMateria[0].id; // seleciona automaticamente se só tiver 1
+      if (censDaMateria.length === 1) cenSel.value = censDaMateria[0].id;
+
+      // Sugerir supervisor padrão do aluno
+      if (alunoAntes) {
+        const aluno = alunos_get(alunoAntes);
+        if (aluno && aluno.supervisorPadraoId) picker.setPrincipalIfEmpty(aluno.supervisorPadraoId);
+      }
     });
 
     function close() { overlay.remove(); }
