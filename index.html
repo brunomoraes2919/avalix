@@ -7677,6 +7677,15 @@ function pode(acao) {
     const empty = $('#relEmptyState', container);
 
     let lista = avaliacoes_list();
+    /* Professores só veem as fichas onde são supervisor (principal ou compartilhado) */
+    const _sessRel = session_get();
+    if (_sessRel && _sessRel.papel === 'professor') {
+      lista = lista.filter(a =>
+        a.supervisorPrincipalId === _sessRel.id ||
+        (Array.isArray(a.supervisoresCompartilhadosIds) && a.supervisoresCompartilhadosIds.includes(_sessRel.id))
+      );
+    }
+
     if (listStatus !== 'todos') lista = lista.filter(a => a.status === listStatus);
     if (listCenario !== 'todos') lista = lista.filter(a => avaliacao_cenarioNome(a) === listCenario);
     if (listSupervisor !== 'todos') lista = lista.filter(a => {
@@ -7743,6 +7752,15 @@ function pode(acao) {
      ============================================================ */
   function filtrarLista() {
     let lista = avaliacoes_list();
+    /* Professores só veem as fichas onde são supervisor (principal ou compartilhado) */
+    const _sessRel = session_get();
+    if (_sessRel && _sessRel.papel === 'professor') {
+      lista = lista.filter(a =>
+        a.supervisorPrincipalId === _sessRel.id ||
+        (Array.isArray(a.supervisoresCompartilhadosIds) && a.supervisoresCompartilhadosIds.includes(_sessRel.id))
+      );
+    }
+
     if (listStatus !== 'todos') lista = lista.filter(a => a.status === listStatus);
     if (listCenario !== 'todos') lista = lista.filter(a => avaliacao_cenarioNome(a) === listCenario);
     if (listSupervisor !== 'todos') lista = lista.filter(a => {
