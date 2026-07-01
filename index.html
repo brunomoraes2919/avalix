@@ -1471,6 +1471,54 @@ function _supaSchedule() {
   _supa.timer = setTimeout(_supaPush, 2000);
 }
 
+/* ── Polling: verifica Supabase a cada 30s e sincroniza se houver novidade ── */
+var _supaLastTs = null;   // último atualizado_em visto no Supabase
+var _supaMyPush = 0;      // quando EU fiz o último push (ms)
+
+function _supaStartPolling() {
+  setInterval(_supaPollCheck, 30000);
+}
+
+function _supaPollCheck() {
+  /* Não fazer nada se acabei de enviar (evitar loop) */
+  if (Date.now() - _supaMyPush < 10000) return;
+
+  _supaFetch('/rest/v1/avaliaclin_dados?id=eq.principal&select=atualizado_em', { cache: 'no-store' })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(rows) {
+      if (!rows || !rows[0] || !rows[0].atualizado_em) return;
+      var remoteTs = rows[0].atualizado_em;
+      if (_supaLastTs && remoteTs === _supaLastTs) return; // nada mudou
+      _supaLastTs = remoteTs;
+      /* Baixar dados completos e atualizar localStorage */
+      _supaFetch('/rest/v1/avaliaclin_dados?id=eq.principal&select=dados', { cache: 'no-store' })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(dr) {
+          if (!dr || !dr[0] || !dr[0].dados) return;
+          localStorage.setItem(DB_KEY, JSON.stringify(dr[0].dados));
+          /* Atualizar a tela atual suavemente */
+          try {
+            var activeBtn = document.querySelector('.nav-item.active');
+            var view = activeBtn ? activeBtn.dataset.view : null;
+            if (view && window.AvaliaClinNavigate) {
+              window.AvaliaClinNavigate(view);
+            }
+            if (typeof refreshNotifBadge === 'function') refreshNotifBadge();
+            if (window.showToast) showToast('Dados atualizados em tempo real.', 'success');
+          } catch(e) {}
+        })
+        .catch(function() {});
+    })
+    .catch(function() {});
+}
+
+/* Sobrescrever _supaPush para registrar timestamp do push próprio */
+var _supaPushOrig = _supaPush;
+_supaPush = function() {
+  _supaMyPush = Date.now();
+  _supaPushOrig();
+};
+
 
 const SESSION_KEY = 'avaliaclin_session_v1';
 
@@ -8317,6 +8365,8 @@ function pode(acao) {
 
     /* Sync Supabase em background — nunca bloqueia */
     setTimeout(function() { try { _supaPull(); } catch(e) {} }, 500);
+    /* Polling: verificar novidades a cada 30s */
+    setTimeout(function() { try { _supaStartPolling(); } catch(e) {} }, 5000);
   });
 
 })();
