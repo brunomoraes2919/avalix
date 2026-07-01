@@ -1439,6 +1439,7 @@ function _supaPull() {
       if (rows && rows[0] && rows[0].dados) {
         localStorage.setItem(DB_KEY, JSON.stringify(rows[0].dados));
         try { if (typeof refreshLoginStats === 'function') refreshLoginStats(); } catch(e) {}
+        try { if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge(); } catch(e) {}
       } else {
         /* Supabase vazio → envia o seed local para compartilhar */
         _supaSchedule();
@@ -1476,7 +1477,7 @@ var _supaLastTs = null;   // último atualizado_em visto no Supabase
 var _supaMyPush = 0;      // quando EU fiz o último push (ms)
 
 function _supaStartPolling() {
-  setInterval(_supaPollCheck, 30000);
+  setInterval(_supaPollCheck, 5000);
 }
 
 function _supaPollCheck() {
@@ -1503,8 +1504,9 @@ function _supaPollCheck() {
             if (view && window.AvaliaClinNavigate) {
               window.AvaliaClinNavigate(view);
             }
-            if (typeof refreshNotifBadge === 'function') refreshNotifBadge();
-            if (window.showToast) showToast('Dados atualizados em tempo real.', 'success');
+            if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge();
+            if (typeof window.paintNotifList === 'function') window.paintNotifList();
+            /* Toast removido no polling rápido (5s) para não piscar */
           } catch(e) {}
         })
         .catch(function() {});
@@ -2948,11 +2950,24 @@ function materia_update(id, payload) {
   const db = db_load();
   const m = (db.config.materias || []).find(m => m.id === id);
   if (!m) return { ok: false, msg: 'Matéria não encontrada.' };
-  if (payload.nome     !== undefined) m.nome     = String(payload.nome).trim();
+  const supAntes = Array.from(m.supervisores || []);
+  if (payload.nome        !== undefined) m.nome        = String(payload.nome).trim();
   if (payload.cenarios    !== undefined) m.cenarios    = payload.cenarios;
   if (payload.supervisores !== undefined) m.supervisores = payload.supervisores;
   db_save(db);
   logAction('Matéria atualizada: ' + m.nome);
+  /* Notificar professores recém-adicionados à matéria */
+  if (payload.supervisores !== undefined) {
+    const session = session_get();
+    const novos = (m.supervisores || []).filter(uid => !supAntes.includes(uid));
+    novos.forEach(uid => {
+      if (session && uid === session.id) return; // não notificar quem fez a ação
+      notificacoes_create(uid,
+        'Você foi vinculado(a) como professor(a) da matéria "' + m.nome + '".',
+        null
+      );
+    });
+  }
   return { ok: true };
 }
 
@@ -8293,6 +8308,8 @@ function pode(acao) {
     closeMobileSidebar();
   }
   window.AvaliaClinNavigate = navigateTo;
+  window.refreshNotifBadge = refreshNotifBadge;
+  window.paintNotifList = paintNotifList;
 
   /* ---------- Menu lateral retrátil (mobile) ---------- */
   function openMobileSidebar() {
