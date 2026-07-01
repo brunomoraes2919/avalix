@@ -6679,16 +6679,6 @@ function pode(acao) {
         <div class="modal-body">
           <div id="novaFichaAlert"></div>
 
-          <!-- Aluno -->
-          <div class="field" id="f-nf-aluno">
-            <label for="nf-aluno">Aluno(a)</label>
-            <select id="nf-aluno">
-              <option value="">Selecione um(a) aluno(a)</option>
-              ${alunosAtivos.map(a => `<option value="${a.id}">${escapeHtml(a.nome)}</option>`).join('')}
-            </select>
-            <div class="field-error">Selecione um(a) aluno(a).</div>
-          </div>
-
           <!-- Matéria -->
           <div class="field" id="f-nf-materia">
             <label for="nf-materia">Matéria</label>
