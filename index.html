@@ -1397,6 +1397,100 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
    ============================================================ */
 
 const DB_KEY = 'avaliaclin_db_v1';
+
+/* ══ Supabase — sincronização em nuvem ══════════════════════ */
+const _SUPA = {
+  url: 'https://kghaucdhcipxetuilnfw.supabase.co',
+  key: 'sb_publishable_0KLnqY5ufU4CwgXfnHQHcQ_MGSCmpKe',
+  table: 'avaliaclin_dados',
+  rowId: 'principal',
+  syncTimer: null,
+  online: true
+};
+
+function _supaHeaders(extra) {
+  return Object.assign({
+    'Authorization': 'Bearer ' + _SUPA.key,
+    'apikey': _SUPA.key,
+    'Content-Type': 'application/json'
+  }, extra || {});
+}
+
+/* Baixa dados do Supabase → grava em localStorage → retorna true/false */
+async function supabase_pull() {
+  try {
+    const url = _SUPA.url + '/rest/v1/' + _SUPA.table
+      + '?id=eq.' + _SUPA.rowId + '&select=dados';
+    const r = await fetch(url, {
+      method: 'GET',
+      headers: _supaHeaders(),
+      cache: 'no-store'
+    });
+    if (!r.ok) {
+      console.warn('[Supa] pull failed', r.status, await r.text().catch(() => ''));
+      _SUPA.online = false;
+      return false;
+    }
+    const rows = await r.json();
+    if (Array.isArray(rows) && rows.length > 0 && rows[0].dados) {
+      localStorage.setItem(DB_KEY, JSON.stringify(rows[0].dados));
+      _SUPA.online = true;
+      return true;
+    }
+    _SUPA.online = true;
+    return false; // banco vazio — seed local será enviado
+  } catch(e) {
+    console.warn('[Supa] pull error', e);
+    _SUPA.online = false;
+    return false;
+  }
+}
+
+/* Envia localStorage → Supabase (upsert via POST + merge-duplicates) */
+async function supabase_push() {
+  const raw = localStorage.getItem(DB_KEY);
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw);
+    const r = await fetch(_SUPA.url + '/rest/v1/' + _SUPA.table, {
+      method: 'POST',
+      headers: _supaHeaders({
+        'Prefer': 'resolution=merge-duplicates,return=minimal'
+      }),
+      body: JSON.stringify({
+        id: _SUPA.rowId,
+        dados: parsed,
+        atualizado_em: new Date().toISOString()
+      })
+    });
+    if (!r.ok) {
+      console.warn('[Supa] push failed', r.status, await r.text().catch(() => ''));
+    }
+    _SUPA.online = r.ok;
+  } catch(e) {
+    console.warn('[Supa] push error', e);
+    _SUPA.online = false;
+  }
+}
+
+/* Agenda push com debounce de 2s após cada db_save */
+function db_sync() {
+  if (_SUPA.syncTimer) clearTimeout(_SUPA.syncTimer);
+  _supaSetStatus('saving');
+  _SUPA.syncTimer = setTimeout(async () => {
+    await supabase_push();
+    _supaSetStatus(_SUPA.online ? 'ok' : 'offline');
+  }, 2000);
+}
+
+function _supaSetStatus(s) {
+  const dot = document.getElementById('supa-status-dot');
+  const txt = document.getElementById('supa-status-txt');
+  if (!dot || !txt) return;
+  if (s === 'ok')      { dot.style.background='#22C55E'; txt.textContent='Salvo'; }
+  if (s === 'saving')  { dot.style.background='#F59E0B'; txt.textContent='Salvando...'; }
+  if (s === 'offline') { dot.style.background='#EF4444'; txt.textContent='Offline'; }
+}
 const SESSION_KEY = 'avaliaclin_session_v1';
 
 function uid(prefix) {
@@ -2027,11 +2121,13 @@ function db_load() {
 
 function db_save(data) {
   localStorage.setItem(DB_KEY, JSON.stringify(data));
+  db_sync(); // → Supabase
 }
 
 function db_resetSeed() {
   const seed = buildSeed();
   localStorage.setItem(DB_KEY, JSON.stringify(seed));
+  db_sync();
   return seed;
 }
 
@@ -8145,7 +8241,8 @@ function pode(acao) {
      INIT
      ============================================================ */
   document.addEventListener('DOMContentLoaded', function () {
-    db_load(); // garante seed criado
+    // ── Iniciar app imediatamente (sem bloqueio) ──
+    db_load();
     refreshLoginStats();
     initLoginForm();
     initForgotFlow();
@@ -8155,7 +8252,35 @@ function pode(acao) {
 
     const existing = session_get();
     if (existing) enterApp();
+
+    // ── Supabase sync em background (não bloqueia nada) ──
+    setTimeout(_supaInitSync, 300);
   });
+
+  async function _supaInitSync() {
+    // Evitar loop: só sincroniza uma vez por sessão no carregamento inicial
+    if (sessionStorage.getItem('_supa_synced')) {
+      _supaSetStatus('ok');
+      return;
+    }
+    _supaSetStatus('saving');
+    try {
+      const pulled = await supabase_pull();
+      if (pulled) {
+        // Banco remoto tem dados — recarregar para aplicar
+        sessionStorage.setItem('_supa_synced', '1');
+        window.location.reload();
+      } else {
+        // Banco remoto vazio — fazer push do seed local
+        await supabase_push();
+        sessionStorage.setItem('_supa_synced', '1');
+        _supaSetStatus(_SUPA.online ? 'ok' : 'offline');
+      }
+    } catch(e) {
+      _supaSetStatus('offline');
+      sessionStorage.setItem('_supa_synced', '1');
+    }
+  }
 
 })();
 
