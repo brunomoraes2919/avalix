@@ -4935,7 +4935,13 @@ function pode(acao) {
   function renderMateriasCard(outerContainer) {
     const card = outerContainer.querySelector('#cfgMateriasCard');
     if (!card) return;
-    const materias  = materias_list();
+    const session_cfg = session_get();
+    const isProfCfg = session_cfg && session_cfg.papel === 'professor';
+    /* Professores só veem as matérias onde estão vinculados */
+    const _todasMaterias = materias_list();
+    const materias = isProfCfg
+      ? _todasMaterias.filter(m => (m.supervisores || []).includes(session_cfg.id))
+      : _todasMaterias;
     const cenarios  = cenarios_list();
     const usuarios  = (typeof users_list === 'function') ? users_list() : [];
     const profs     = usuarios.filter(u => u.papel === 'professor' || u.papel === 'admin');
@@ -4981,8 +4987,8 @@ function pode(acao) {
         ${materias.length === 0 ? `
           <div style="text-align:center;padding:2rem;color:var(--ac-charcoal-soft);border:2px dashed var(--ac-line);border-radius:var(--radius-md);">
             <i class="ti ti-school" style="font-size:2rem;display:block;margin-bottom:.5rem;opacity:.4;"></i>
-            Nenhuma matéria cadastrada ainda.<br>
-            <span style="font-size:13px;">Crie uma matéria e adicione os cenários e professores.</span>
+            ${isProfCfg ? 'Você ainda não foi vinculado(a) a nenhuma matéria.' : 'Nenhuma matéria cadastrada ainda.'}<br>
+            <span style="font-size:13px;">${isProfCfg ? 'Peça ao administrador para vincular seu perfil às matérias em que você leciona.' : 'Crie uma matéria e adicione os cenários e professores.'}</span>
           </div>
         ` : materias.map(m => {
           const soma = materia_somaPesos(m);
@@ -6230,6 +6236,15 @@ function pode(acao) {
     const canEdit = (window.pode ? pode('lancarNotas') : ['admin', 'professor'].includes(session && session.papel));
 
     let lista = avaliacoes_list();
+
+    /* Professores só veem as fichas onde são supervisor (principal ou compartilhado) */
+    if (session && session.papel === 'professor') {
+      lista = lista.filter(a =>
+        a.supervisorPrincipalId === session.id ||
+        (Array.isArray(a.supervisoresCompartilhadosIds) && a.supervisoresCompartilhadosIds.includes(session.id))
+      );
+    }
+
     if (listStatus !== 'todos') lista = lista.filter(a => a.status === listStatus);
     if (listSearch) {
       lista = lista.filter(a => {
