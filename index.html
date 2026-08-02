@@ -8779,24 +8779,26 @@ function pode(acao) {
 
     const insights = [];
 
-    /* insight geral */
+    /* insight geral — nunca menciona nota, média ou pontos: o aluno só
+       deve ver linguagem qualitativa, mesmo quando o resultado já é
+       oficial (matéria finalizada) */
     if (margem >= 1.5) {
       insights.push({
         bg:'#DCFCE7', border:'#16A34A', iconeCor:'#16A34A',
         icone:'ti-trophy', titulo:'Acima da meta! 🎯',
-        texto:`Sua média atual (${num(notaMedia)}) está ${num(margem)} pontos acima da nota de corte — excelente! Mantenha este ritmo até o final do estágio.`
+        texto:`Seu desempenho está consistentemente acima do mínimo exigido — excelente! Mantenha este ritmo até o final do estágio.`
       });
     } else if (margem >= 0) {
       insights.push({
         bg:'#FEF3C7', border:'#B45309', iconeCor:'#B45309',
         icone:'ti-alert-triangle', titulo:'Na meta — mas atenção ⚡',
-        texto:`Você está aprovado(a) com média ${num(notaMedia)}, porém com margem estreita de ${num(margem)} ponto(s). Um esforço extra nas próximas quinzenas garante maior segurança.`
+        texto:`Você está dentro do mínimo exigido, porém com margem estreita. Um esforço extra nas próximas quinzenas garante maior segurança.`
       });
     } else {
       insights.push({
         bg:'#FEE2E2', border:'#DC2626', iconeCor:'#DC2626',
         icone:'ti-circle-x', titulo:'Abaixo da nota de corte 🔴',
-        texto:`Sua média (${num(notaMedia)}) está ${num(-margem)} ponto(s) abaixo do mínimo exigido (${cfg.notaCorte}). Foque nos pontos de reforço abaixo e converse com seu supervisor.`
+        texto:`Seu desempenho está abaixo do mínimo exigido no momento. Foque nos pontos de reforço abaixo e converse com seu supervisor.`
       });
     }
 
@@ -8805,7 +8807,7 @@ function pode(acao) {
       insights.push({
         bg:'#FEE2E2', border:'#DC2626', iconeCor:'#DC2626',
         icone:'ti-book-2', titulo:`Reforço: ${p.nome}`,
-        texto:`Sua média em "${p.nome}" (${p.blocoNome}) está em ${(p.pct*100).toFixed(0)}% do peso máximo — uma das áreas que mais precisa de atenção. Revise o conteúdo e peça orientação ao supervisor.${p.trend !== null && p.trend > 0.02 ? ' Bom sinal: você já está evoluindo!' : ''}`
+        texto:`Este é um dos critérios de "${p.blocoNome}" que mais precisa de atenção no momento. Revise o conteúdo e peça orientação ao supervisor.${p.trend !== null && p.trend > 0.02 ? ' Bom sinal: você já está evoluindo!' : ''}`
       });
     });
 
@@ -8814,7 +8816,7 @@ function pode(acao) {
       insights.push({
         bg:'#FEF3C7', border:'#B45309', iconeCor:'#B45309',
         icone:'ti-target', titulo:`Foco: ${p.nome}`,
-        texto:`Você está em ${(p.pct*100).toFixed(0)}% em "${p.nome}" — faltam poucos pontos para atingir 70%. Com um pouco mais de dedicação você chega à meta nas próximas quinzenas.`
+        texto:`Você está perto de consolidar este critério — com um pouco mais de dedicação nas próximas quinzenas você chega a um bom domínio.`
       });
     });
 
@@ -8823,7 +8825,7 @@ function pode(acao) {
       insights.push({
         bg:'#DBEAFE', border:'#2563EB', iconeCor:'#2563EB',
         icone:'ti-trending-up', titulo:`Em evolução: ${p.nome} 📈`,
-        texto:`Ótima progressão em "${p.nome}"! Você subiu +${(p.trend*100).toFixed(0)}% entre a primeira e a última quinzena. Continue assim — essa tendência vai refletir na nota final.`
+        texto:`Ótima progressão em "${p.nome}"! Você evoluiu bastante entre a primeira e a última quinzena avaliada. Continue assim — essa tendência é muito positiva.`
       });
     });
 
@@ -8832,7 +8834,7 @@ function pode(acao) {
       insights.push({
         bg:'#FEF3C7', border:'#F59E0B', iconeCor:'#F59E0B',
         icone:'ti-trending-down', titulo:`Atenção: queda em ${p.nome}`,
-        texto:`Apesar de ainda acima de 70%, sua nota em "${p.nome}" caiu nas últimas quinzenas. Revise este conteúdo para não comprometer seu resultado.`
+        texto:`Este critério ainda está com bom domínio, mas caiu um pouco nas últimas quinzenas em relação ao início. Revise este conteúdo para não perder o ritmo.`
       });
     });
 
@@ -8842,7 +8844,7 @@ function pode(acao) {
       insights.push({
         bg:'#DCFCE7', border:'#16A34A', iconeCor:'#16A34A',
         icone:'ti-star', titulo:`Ponto forte: ${best.nome} ✅`,
-        texto:`Você tem ótimo domínio em "${best.nome}" com ${(best.pct*100).toFixed(0)}% do peso — sua melhor área! Continue mantendo esse nível e inspire outros critérios com o mesmo empenho.`
+        texto:`Você tem ótimo domínio em "${best.nome}" — sua melhor área! Continue mantendo esse nível e inspire outros critérios com o mesmo empenho.`
       });
     }
 
