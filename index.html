@@ -1399,7 +1399,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <!-- Seção do aluno — visível apenas para o papel 'aluno' -->
       <div class="nav-section-label" id="nav-section-aluno" style="display:none;">Minha área</div>
       <button class="nav-item" data-view="aluno" style="display:none;"><i class="ti ti-chart-bar-popular"></i> Meu Desempenho</button>
-      <button class="nav-item" data-view="fichasClinicas" style="display:none;"><i class="ti ti-file-description"></i> Fichas de UTI</button>
+      <button class="nav-item" data-view="fichasClinicas" style="display:none;"><i class="ti ti-file-description"></i> Fichas</button>
 
       <div class="nav-section-label">Geral</div>
       <button class="nav-item active" data-view="dashboard"><i class="ti ti-layout-dashboard"></i> Painel geral</button>
@@ -1409,6 +1409,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <button class="nav-item" data-view="avaliacoes"><i class="ti ti-clipboard-check"></i> Lançar notas</button>
       <button class="nav-item" data-view="relatorios"><i class="ti ti-file-report"></i> Relatórios em PDF</button>
       <button class="nav-item" data-view="fichasClinicasEquipe"><i class="ti ti-file-description"></i> Fichas de UTI</button>
+      <button class="nav-item" data-view="fichaModelos"><i class="ti ti-forms"></i> Cadastrar ficha</button>
 
       <div class="nav-section-label" id="nav-section-admin">Administração</div>
       <button class="nav-item" data-view="turmas"><i class="ti ti-school"></i> Turmas</button>
@@ -2001,6 +2002,22 @@ function buildSeed() {
       }
     ],
     fichasClinicas: [],
+    fichaModelos: [
+      {
+        id: uid('modelo'),
+        titulo: 'Ficha de Avaliação e Evolução Fisioterapêutica — UTI Adulto',
+        materiasIds: [matCardioTOId],
+        criadoPorId: sabrinaId,
+        criadoEm: ago(300),
+        atualizadoEm: ago(300),
+        topicos: FICHA_CLINICA_SECOES_LEGADO.map(sec => ({
+          id: sec.id,
+          titulo: sec.titulo,
+          subtopicos: sec.campos.map(c => ({ id: c.id, titulo: c.label, obrigatorio: c.id === 'nomePaciente' }))
+        }))
+      }
+    ],
+    pacientes: [],
     auditLog: []
   };
 }
@@ -2292,6 +2309,59 @@ function db_migrate(data) {
   if (data.version < 15) {
     if (!Array.isArray(data.fichasClinicas)) data.fichasClinicas = [];
     data.version = 15; changed = true;
+  }
+
+  // v16 — modelos de ficha configuráveis pelo professor (título +
+  // tópicos/subtópicos, vinculados a matérias) e cadastro de pacientes
+  // pelo aluno. Fichas passam a referenciar pacienteId + modeloId em
+  // vez de um formulário fixo. Migra fichas já existentes (do antigo
+  // formulário fixo "UTI Adulto") criando um modelo legado equivalente
+  // e um paciente por ficha antiga, para não perder nada já lançado.
+  if (data.version < 16) {
+    if (!Array.isArray(data.fichaModelos)) data.fichaModelos = [];
+    if (!Array.isArray(data.pacientes)) data.pacientes = [];
+
+    const fichasAntigas = (data.fichasClinicas || []).filter(f => !f.modeloId);
+    if (fichasAntigas.length) {
+      const modeloLegadoId = uid('modelo');
+      data.fichaModelos.push({
+        id: modeloLegadoId,
+        titulo: 'Ficha de Avaliação e Evolução Fisioterapêutica — UTI Adulto (modelo legado)',
+        materiasIds: [],
+        criadoPorId: null,
+        criadoEm: new Date().toISOString(),
+        atualizadoEm: new Date().toISOString(),
+        topicos: FICHA_CLINICA_SECOES_LEGADO.map(sec => ({
+          id: sec.id,
+          titulo: sec.titulo,
+          subtopicos: sec.campos.map(c => ({ id: c.id, titulo: c.label, obrigatorio: false }))
+        }))
+      });
+
+      const pacientePorChave = {};
+      fichasAntigas.forEach(f => {
+        const nome = (f.dados && f.dados.nomePaciente) ? String(f.dados.nomePaciente).trim() : '';
+        const chave = f.alunoId + '||' + nome.toLowerCase();
+        let paciente = pacientePorChave[chave];
+        if (!paciente) {
+          paciente = {
+            id: uid('paciente'),
+            alunoId: f.alunoId,
+            nome: nome || 'Paciente (migrado)',
+            idade: (f.dados && f.dados.idade) || '',
+            sexo: (f.dados && f.dados.sexo) || '',
+            criadoEm: f.criadoEm,
+            atualizadoEm: f.atualizadoEm
+          };
+          pacientePorChave[chave] = paciente;
+          data.pacientes.push(paciente);
+        }
+        f.pacienteId = paciente.id;
+        f.modeloId = modeloLegadoId;
+      });
+    }
+
+    data.version = 16; changed = true;
   }
   return changed;
 }
@@ -3035,6 +3105,13 @@ function avaliacoes_listByAluno(alunoId) {
 /* ══ Matérias ═══════════════════════════════════════════════ */
 function materias_list() { return config_get().materias || []; }
 
+/* Matérias onde o professor está vinculado como supervisor — usado
+   para restringir a quais matérias ele pode vincular um modelo de
+   ficha (mesmo critério de "dono" usado no resto do app). */
+function materias_visiveisParaProfessor(userId) {
+  return materias_list().filter(m => (m.supervisores || []).includes(userId));
+}
+
 function materia_get(id) {
   return materias_list().find(m => m.id === id) || null;
 }
@@ -3610,18 +3687,20 @@ function calc_materia_semanal(materiaId, alunoId) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   Fichas clínicas — "Ficha de Avaliação e Evolução Fisioterapêutica
-   – UTI Adulto". O aluno cria quantas fichas quiser, edita livremente
-   enquanto estiverem em rascunho, e ao integrar a ficha fica travada
-   para sempre (só leitura + PDF). Independente de matéria/cenário.
+   Fichas clínicas — modelos de ficha configuráveis pelo professor
+   (título + tópicos/subtópicos, cada um opcionalmente obrigatório),
+   vinculados a matérias. O aluno cadastra pacientes e lança quantas
+   fichas quiser por paciente, usando um dos modelos disponíveis para
+   a(s) matéria(s) em que está inscrito. Edita livremente enquanto em
+   rascunho; ao integrar (irreversível), a ficha fica travada (só
+   leitura + PDF) e passa a ficar visível para o(s) professor(es).
    ══════════════════════════════════════════════════════════════ */
 
-/* Schema dos campos, agrupados em seções — usado tanto para montar
-   o formulário quanto para a visualização somente-leitura e o PDF. */
-const FICHA_CLINICA_SECOES = [
-  {
-    id: 'identificacao', titulo: 'Identificação',
-    campos: [
+/* Cópia estática do antigo formulário fixo "UTI Adulto", mantida
+   apenas para a migração de dados de versões anteriores a esta
+   funcionalidade — não é mais usada pelo app em uso normal. */
+const FICHA_CLINICA_SECOES_LEGADO = [
+  { id: 'identificacao', titulo: 'Identificação', campos: [
       { id: 'nomePaciente', label: 'Nome do paciente', tipo: 'text', full: true },
       { id: 'leito', label: 'Leito', tipo: 'text' },
       { id: 'data', label: 'Data', tipo: 'date' },
@@ -3629,20 +3708,14 @@ const FICHA_CLINICA_SECOES = [
       { id: 'sexo', label: 'Sexo', tipo: 'text' },
       { id: 'diagnostico', label: 'Diagnóstico clínico', tipo: 'textarea', full: true },
       { id: 'fisioterapeutaPlantao', label: 'Fisioterapeuta do plantão', tipo: 'text', full: true }
-    ]
-  },
-  {
-    id: 'exames', titulo: 'Exames de imagens e laboratoriais',
-    campos: [
+  ]},
+  { id: 'exames', titulo: 'Exames de imagens e laboratoriais', campos: [
       { id: 'examesHemograma', label: 'Hemograma', tipo: 'textarea', full: true },
       { id: 'examesGasometria', label: 'Gasometria', tipo: 'textarea', full: true },
       { id: 'examesRxTc', label: 'RX / TC', tipo: 'textarea', full: true },
       { id: 'examesOutros', label: 'Outros', tipo: 'textarea', full: true }
-    ]
-  },
-  {
-    id: 'cardio', titulo: 'Avaliação cardiovascular',
-    campos: [
+  ]},
+  { id: 'cardio', titulo: 'Avaliação cardiovascular', campos: [
       { id: 'fc', label: 'FC', tipo: 'text' },
       { id: 'paSist', label: 'PA sistólica (mmHg)', tipo: 'text' },
       { id: 'paDiast', label: 'PA diastólica (mmHg)', tipo: 'text' },
@@ -3650,11 +3723,8 @@ const FICHA_CLINICA_SECOES = [
       { id: 'ac', label: 'AC (ausculta cardíaca)', tipo: 'textarea', full: true },
       { id: 'perfusaoPeriferica', label: 'Perfusão periférica', tipo: 'textarea', full: true },
       { id: 'edema', label: 'Edema', tipo: 'textarea', full: true }
-    ]
-  },
-  {
-    id: 'respiratoria', titulo: 'Avaliação respiratória',
-    campos: [
+  ]},
+  { id: 'respiratoria', titulo: 'Avaliação respiratória', campos: [
       { id: 'fr', label: 'FR (irpm)', tipo: 'text' },
       { id: 'spo2Resp', label: 'SpO² (%)', tipo: 'text' },
       { id: 'temperatura', label: 'T (°C)', tipo: 'text' },
@@ -3662,11 +3732,8 @@ const FICHA_CLINICA_SECOES = [
       { id: 'expansibilidadeToracica', label: 'Expansibilidade torácica', tipo: 'textarea', full: true },
       { id: 'tosse', label: 'Tosse', tipo: 'textarea', full: true },
       { id: 'suporteVentilatorio', label: 'Suporte ventilatório', tipo: 'textarea', full: true }
-    ]
-  },
-  {
-    id: 'vm', titulo: 'Ventilação mecânica',
-    campos: [
+  ]},
+  { id: 'vm', titulo: 'Ventilação mecânica', campos: [
       { id: 'vmModo', label: 'Modo', tipo: 'text' },
       { id: 'vmFio2', label: 'FiO²', tipo: 'text' },
       { id: 'vmPeep', label: 'PEEP', tipo: 'text' },
@@ -3674,32 +3741,206 @@ const FICHA_CLINICA_SECOES = [
       { id: 'vmVt', label: 'VT', tipo: 'text' },
       { id: 'vmFr', label: 'FR', tipo: 'text' },
       { id: 'vmPpico', label: 'P pico', tipo: 'text' }
-    ]
-  },
-  {
-    id: 'forca', titulo: 'Força muscular periférica',
-    campos: [
+  ]},
+  { id: 'forca', titulo: 'Força muscular periférica', campos: [
       { id: 'kendallMsd', label: 'Kendall — MSD', tipo: 'text' },
       { id: 'kendallMse', label: 'Kendall — MSE', tipo: 'text' },
       { id: 'kendallMid', label: 'Kendall — MID', tipo: 'text' },
       { id: 'kendallMie', label: 'Kendall — MIE', tipo: 'text' },
       { id: 'mrc', label: 'MRC (/60)', tipo: 'text' },
       { id: 'nivelConsciencia', label: 'Nível de consciência', tipo: 'text', full: true }
-    ]
-  },
-  {
-    id: 'plano', titulo: 'Objetivos e condutas',
-    campos: [
+  ]},
+  { id: 'plano', titulo: 'Objetivos e condutas', campos: [
       { id: 'objetivos', label: 'Objetivos fisioterapêuticos', tipo: 'textarea-lg', full: true },
       { id: 'condutas', label: 'Condutas fisioterapêuticas', tipo: 'textarea-lg', full: true },
       { id: 'observacao', label: 'Observação', tipo: 'textarea', full: true }
-    ]
-  }
+  ]}
 ];
 
-function fichaClinica_dadosVazios() {
+/* ══ Modelos de ficha (cadastrados pelo professor) ═══════════════ */
+
+function fichaModelo_get(id) {
+  const db = db_load();
+  return (db.fichaModelos || []).find(m => m.id === id) || null;
+}
+
+/* Modelos visíveis para gerenciamento — admin vê todos, professor só
+   os que ele mesmo criou (mesma lógica de "dono" usada em matérias). */
+function fichaModelos_doProfessor(userId, isAdmin) {
+  const db = db_load();
+  const todos = (db.fichaModelos || []).slice().sort((a, b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm));
+  if (isAdmin) return todos;
+  return todos.filter(m => m.criadoPorId === userId);
+}
+
+/* Modelos disponíveis para um aluno lançar uma ficha nova — todo
+   modelo vinculado a alguma matéria em que o aluno está inscrito. */
+function modelos_disponiveisParaAluno(alunoId) {
+  const cfg = config_get();
+  const db = db_load();
+  const materiasDoAluno = new Set(
+    (cfg.materias || []).filter(m => (m.alunos || []).includes(alunoId)).map(m => m.id)
+  );
+  return (db.fichaModelos || []).filter(modelo =>
+    (modelo.materiasIds || []).some(mid => materiasDoAluno.has(mid))
+  );
+}
+
+function fichaModelo_topicoVazio() {
+  return { id: uid('topico'), titulo: '', subtopicos: [] };
+}
+function fichaModelo_subtopicoVazio() {
+  return { id: uid('subtopico'), titulo: '', obrigatorio: false };
+}
+
+function fichaModelo_create(payload) {
+  const db = db_load();
+  if (!Array.isArray(db.fichaModelos)) db.fichaModelos = [];
+  const titulo = (payload.titulo || '').trim();
+  if (!titulo) return { ok: false, msg: 'Informe o título da ficha.' };
+  const topicos = (payload.topicos || []).filter(t => (t.titulo || '').trim());
+  if (!topicos.length) return { ok: false, msg: 'Adicione ao menos um tópico com título.' };
+
+  const agora = new Date().toISOString();
+  const session = session_get();
+  const modelo = {
+    id: uid('modelo'),
+    titulo,
+    materiasIds: Array.isArray(payload.materiasIds) ? payload.materiasIds.slice() : [],
+    criadoPorId: session ? session.id : null,
+    criadoEm: agora,
+    atualizadoEm: agora,
+    topicos: topicos.map(t => ({
+      id: t.id || uid('topico'),
+      titulo: t.titulo.trim(),
+      subtopicos: (t.subtopicos || []).filter(s => (s.titulo || '').trim()).map(s => ({
+        id: s.id || uid('subtopico'),
+        titulo: s.titulo.trim(),
+        obrigatorio: !!s.obrigatorio
+      }))
+    }))
+  };
+  db.fichaModelos.push(modelo);
+  db_save(db);
+  logAction(`Modelo de ficha criado: ${titulo}`);
+  return { ok: true, modelo };
+}
+
+function fichaModelo_update(id, payload) {
+  const db = db_load();
+  const modelo = (db.fichaModelos || []).find(m => m.id === id);
+  if (!modelo) return { ok: false, msg: 'Modelo não encontrado.' };
+  const titulo = (payload.titulo || '').trim();
+  if (!titulo) return { ok: false, msg: 'Informe o título da ficha.' };
+  const topicos = (payload.topicos || []).filter(t => (t.titulo || '').trim());
+  if (!topicos.length) return { ok: false, msg: 'Adicione ao menos um tópico com título.' };
+
+  modelo.titulo = titulo;
+  if (Array.isArray(payload.materiasIds)) modelo.materiasIds = payload.materiasIds.slice();
+  modelo.topicos = topicos.map(t => ({
+    id: t.id || uid('topico'),
+    titulo: t.titulo.trim(),
+    subtopicos: (t.subtopicos || []).filter(s => (s.titulo || '').trim()).map(s => ({
+      id: s.id || uid('subtopico'),
+      titulo: s.titulo.trim(),
+      obrigatorio: !!s.obrigatorio
+    }))
+  }));
+  modelo.atualizadoEm = new Date().toISOString();
+  db_save(db);
+  return { ok: true, modelo };
+}
+
+function fichaModelo_temFichas(id) {
+  const db = db_load();
+  return (db.fichasClinicas || []).some(f => f.modeloId === id);
+}
+
+function fichaModelo_delete(id) {
+  const db = db_load();
+  const idx = (db.fichaModelos || []).findIndex(m => m.id === id);
+  if (idx === -1) return { ok: false, msg: 'Modelo não encontrado.' };
+  if (fichaModelo_temFichas(id)) {
+    return { ok: false, msg: 'Não é possível excluir: já existem fichas lançadas usando este modelo.' };
+  }
+  db.fichaModelos.splice(idx, 1);
+  db_save(db);
+  return { ok: true };
+}
+
+/* ══ Pacientes (cadastrados pelo aluno) ══════════════════════════ */
+
+function paciente_get(id) {
+  const db = db_load();
+  return (db.pacientes || []).find(p => p.id === id) || null;
+}
+
+function pacientes_doAluno(alunoId) {
+  const db = db_load();
+  return (db.pacientes || [])
+    .filter(p => p.alunoId === alunoId)
+    .sort((a, b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm));
+}
+
+function paciente_create(alunoId, dados) {
+  const db = db_load();
+  if (!Array.isArray(db.pacientes)) db.pacientes = [];
+  const nome = (dados.nome || '').trim();
+  if (!nome) return { ok: false, msg: 'Informe o nome do paciente.' };
+  const agora = new Date().toISOString();
+  const paciente = {
+    id: uid('paciente'),
+    alunoId,
+    nome,
+    idade: (dados.idade || '').toString().trim(),
+    sexo: (dados.sexo || '').toString().trim(),
+    criadoEm: agora,
+    atualizadoEm: agora
+  };
+  db.pacientes.push(paciente);
+  db_save(db);
+  return { ok: true, paciente };
+}
+
+function paciente_update(id, dados) {
+  const db = db_load();
+  const paciente = (db.pacientes || []).find(p => p.id === id);
+  if (!paciente) return { ok: false, msg: 'Paciente não encontrado.' };
+  const nome = (dados.nome || '').trim();
+  if (!nome) return { ok: false, msg: 'Informe o nome do paciente.' };
+  paciente.nome = nome;
+  paciente.idade = (dados.idade || '').toString().trim();
+  paciente.sexo = (dados.sexo || '').toString().trim();
+  paciente.atualizadoEm = new Date().toISOString();
+  db_save(db);
+  return { ok: true, paciente };
+}
+
+function paciente_temFichas(id) {
+  const db = db_load();
+  return (db.fichasClinicas || []).some(f => f.pacienteId === id);
+}
+
+/* Exclusão bloqueada se já existir qualquer ficha (rascunho ou
+   integrada) lançada para este paciente — evita perder o vínculo
+   de fichas já criadas com um paciente "órfão". */
+function paciente_delete(id) {
+  const db = db_load();
+  const idx = (db.pacientes || []).findIndex(p => p.id === id);
+  if (idx === -1) return { ok: false, msg: 'Paciente não encontrado.' };
+  if (paciente_temFichas(id)) {
+    return { ok: false, msg: 'Não é possível excluir: já existem fichas lançadas para este paciente.' };
+  }
+  db.pacientes.splice(idx, 1);
+  db_save(db);
+  return { ok: true };
+}
+
+/* ══ Fichas clínicas (lançadas pelo aluno, por paciente + modelo) ══ */
+
+function fichaClinica_dadosVaziosDoModelo(modelo) {
   const dados = {};
-  FICHA_CLINICA_SECOES.forEach(sec => sec.campos.forEach(c => { dados[c.id] = ''; }));
+  (modelo.topicos || []).forEach(t => (t.subtopicos || []).forEach(s => { dados[s.id] = ''; }));
   return dados;
 }
 
@@ -3716,15 +3957,27 @@ function fichasClinicas_doAluno(alunoId) {
     .sort((a, b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm));
 }
 
-function fichaClinica_create(alunoId) {
+/* Fichas de um paciente específico ("pasta do paciente") */
+function fichasClinicas_doPaciente(pacienteId) {
+  const db = db_load();
+  return (db.fichasClinicas || [])
+    .filter(f => f.pacienteId === pacienteId)
+    .sort((a, b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm));
+}
+
+function fichaClinica_create(alunoId, pacienteId, modeloId) {
+  const modelo = fichaModelo_get(modeloId);
+  if (!modelo) return { ok: false, msg: 'Modelo de ficha não encontrado.' };
   const db = db_load();
   if (!Array.isArray(db.fichasClinicas)) db.fichasClinicas = [];
   const agora = new Date().toISOString();
   const ficha = {
     id: uid('ficha_clin'),
     alunoId,
+    pacienteId,
+    modeloId,
     status: 'rascunho',
-    dados: fichaClinica_dadosVazios(),
+    dados: fichaClinica_dadosVaziosDoModelo(modelo),
     criadoEm: agora,
     atualizadoEm: agora,
     integradoEm: null
@@ -3747,13 +4000,35 @@ function fichaClinica_update(id, dadosParciais) {
   return { ok: true, ficha };
 }
 
-/* Integração — ação irreversível. A partir daqui a ficha é só-leitura
-   e passa a ficar visível para o(s) professor(es) do aluno. */
+/* Lista os subtópicos obrigatórios do modelo de uma ficha que ainda
+   estão vazios — usado para bloquear a integração até tudo estar
+   preenchido. */
+function fichaClinica_obrigatoriosPendentes(ficha) {
+  const modelo = fichaModelo_get(ficha.modeloId);
+  if (!modelo) return [];
+  const pendentes = [];
+  (modelo.topicos || []).forEach(t => {
+    (t.subtopicos || []).forEach(s => {
+      if (s.obrigatorio && !(ficha.dados[s.id] || '').toString().trim()) {
+        pendentes.push(s.titulo);
+      }
+    });
+  });
+  return pendentes;
+}
+
+/* Integração — ação irreversível. Bloqueada se houver campo
+   obrigatório do modelo ainda não preenchido. A partir daqui a ficha
+   é só-leitura e passa a ficar visível para o(s) professor(es). */
 function fichaClinica_integrar(id) {
   const db = db_load();
   const ficha = (db.fichasClinicas || []).find(f => f.id === id);
   if (!ficha) return { ok: false, msg: 'Ficha não encontrada.' };
   if (ficha.status !== 'rascunho') return { ok: false, msg: 'Esta ficha já foi integrada.' };
+  const pendentes = fichaClinica_obrigatoriosPendentes(ficha);
+  if (pendentes.length) {
+    return { ok: false, msg: 'Preencha os campos obrigatórios antes de integrar: ' + pendentes.join(', ') + '.' };
+  }
   const agora = new Date().toISOString();
   ficha.status = 'integrada';
   ficha.integradoEm = agora;
@@ -8699,8 +8974,9 @@ function pode(acao) {
     usuarios:       { title: 'Usuários',              sub: 'Administradores, professores e visualizadores' },
     auditoria:      { title: 'Histórico',             sub: 'Registro de ações realizadas na plataforma' },
     aluno:          { title: 'Meu Desempenho',         sub: 'Suas fichas de avaliação e evolução nas práticas supervisionadas' },
-    fichasClinicas: { title: 'Fichas de UTI', sub: 'Crie, edite e integre suas fichas de avaliação e evolução fisioterapêutica' },
-    fichasClinicasEquipe: { title: 'Fichas de UTI', sub: 'Fichas integradas pelos alunos, com registro de data e hora' }
+    fichasClinicas: { title: 'Fichas', sub: 'Cadastre pacientes e lance quantas fichas quiser para cada um' },
+    fichasClinicasEquipe: { title: 'Fichas de UTI', sub: 'Fichas integradas pelos alunos, com registro de data e hora' },
+    fichaModelos: { title: 'Cadastrar ficha', sub: 'Crie modelos de ficha (tópicos e subtópicos) e vincule a matérias' }
   };
 
   function applyRolePermissions() {
@@ -8724,7 +9000,7 @@ function pode(acao) {
 
     // Demais papéis — sempre ocultar os itens exclusivos do aluno
     const adminOnlyViews = ['usuarios', 'auditoria'];
-    const profPlusViews  = ['configuracoes', 'turmas'];
+    const profPlusViews  = ['configuracoes', 'turmas', 'fichaModelos'];
 
     $all('.nav-item').forEach(btn => {
       const view = btn.dataset.view;
@@ -9476,21 +9752,23 @@ function pode(acao) {
 
 <script>
 /* ============================================================
-   Avalix — Fichas de Avaliação e Evolução Fisioterapêutica (UTI)
-   (views-fichas-clinicas.js)
+   Avalix — Fichas do aluno (views-fichas-clinicas.js)
 
    Duas telas plugadas em:
-   - window.AvaliaClinViews.fichasClinicas       (aluno)
+   - window.AvaliaClinViews.fichasClinicas       (aluno — aba "Fichas")
    - window.AvaliaClinViews.fichasClinicasEquipe (professor/admin/visualizador)
 
-   O aluno cria quantas fichas quiser, edita livremente enquanto
-   estiverem em rascunho. Ao integrar (ação irreversível, com
-   confirmação), a ficha vira somente-leitura e passa a aparecer
-   para o(s) professor(a/es) responsável(is), já com o registro de
-   quando foi criada e integrada. A partir da integração, tanto o
-   aluno quanto a equipe podem baixar a ficha em PDF (via
-   window.print(), mesmo mecanismo já usado em "Relatórios em PDF"),
-   com a logomarca/nome da instituição e campos de assinatura.
+   A aba do aluno tem duas sub-abas: "Cadastro de pacientes" (CRUD
+   simples de nome/idade/sexo) e "Lançamento de ficha" (escolhe um
+   paciente cadastrado, abre a "pasta" dele e lança quantas fichas
+   quiser, cada uma usando um dos modelos que o professor vinculou à
+   matéria em que o aluno está inscrito). Cada ficha segue o mesmo
+   ciclo de vida: rascunho editável → Integrar (irreversível, com
+   confirmação e validação dos campos obrigatórios do modelo) →
+   somente leitura + PDF com logomarca da instituição e assinaturas.
+
+   A tela da equipe lista só as fichas já integradas, respeitando a
+   mesma regra de visibilidade por matéria supervisionada.
    ============================================================ */
 (function () {
   'use strict';
@@ -9512,10 +9790,47 @@ function pode(acao) {
     if (!iso) return '—';
     try { return new Date(iso).toLocaleString('pt-BR'); } catch (e) { return iso; }
   }
+  function infoPacienteLinha(p) {
+    if (!p) return '';
+    const partes = [];
+    if (p.idade) partes.push(escapeHtml(p.idade) + ' anos');
+    if (p.sexo) partes.push(escapeHtml(p.sexo));
+    return partes.join(' · ');
+  }
+
+  /* ── Modal genérico de aviso (bloqueio) ── */
+  function abrirModalAviso(titulo, msg) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:420px;">
+        <div class="modal-head">
+          <h3>${escapeHtml(titulo)}</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div style="display:flex;gap:.6rem;align-items:flex-start;">
+            <i class="ti ti-alert-triangle" style="color:var(--ac-warning);font-size:20px;flex-shrink:0;margin-top:1px;"></i>
+            <p style="margin:0;color:var(--ac-charcoal-soft);">${escapeHtml(msg)}</p>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-primary" data-act="ok">Entendi</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="ok"]').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
 
   /* ── Ficha impressa / PDF — reaproveitada pela view do aluno e da equipe ── */
   function buildFichaSheetHtml(ficha) {
     const aluno = alunos_get(ficha.alunoId);
+    const paciente = paciente_get(ficha.pacienteId);
+    const modelo = fichaModelo_get(ficha.modeloId);
     const instituicao = instituicao_get();
 
     return `
@@ -9526,24 +9841,26 @@ function pode(acao) {
             : `<div class="inst-nome">${escapeHtml(instituicao.nome || '')}</div>`
           }
           <div class="inst-curso">${escapeHtml(instituicao.curso || 'Curso de Fisioterapia')}</div>
-          <div class="ficha-titulo">Ficha de Avaliação e Evolução Fisioterapêutica — UTI Adulto</div>
+          <div class="ficha-titulo">${escapeHtml(modelo ? modelo.titulo : 'Ficha clínica')}</div>
         </div>
 
         <div class="report-meta-grid">
           <div class="meta-item"><span class="meta-label">Aluno(a)</span><span class="meta-value">${escapeHtml(aluno ? aluno.nome : 'Aluno(a) removido(a)')}</span></div>
           <div class="meta-item"><span class="meta-label">Matrícula</span><span class="meta-value">${escapeHtml(aluno ? aluno.matricula : '—')}</span></div>
+          <div class="meta-item"><span class="meta-label">Paciente</span><span class="meta-value">${escapeHtml(paciente ? paciente.nome : '—')}</span></div>
+          <div class="meta-item"><span class="meta-label">Idade / Sexo</span><span class="meta-value">${paciente && paciente.idade ? escapeHtml(paciente.idade) : '—'} / ${paciente && paciente.sexo ? escapeHtml(paciente.sexo) : '—'}</span></div>
           <div class="meta-item"><span class="meta-label">Ficha criada em</span><span class="meta-value">${fmtDataHora(ficha.criadoEm)}</span></div>
           <div class="meta-item"><span class="meta-label">Ficha integrada em</span><span class="meta-value">${fmtDataHora(ficha.integradoEm)}</span></div>
         </div>
 
-        ${FICHA_CLINICA_SECOES.map(sec => `
+        ${(modelo ? modelo.topicos : []).map(t => `
           <div class="report-clin-secao">
-            <h4>${escapeHtml(sec.titulo)}</h4>
+            <h4>${escapeHtml(t.titulo)}</h4>
             <div class="report-clin-grid">
-              ${sec.campos.map(c => `
-                <div class="clin-item${c.full ? ' full' : ''}">
-                  <span class="clin-label">${escapeHtml(c.label)}</span>
-                  <span class="clin-value">${escapeHtml(ficha.dados[c.id]) || '—'}</span>
+              ${t.subtopicos.map(s => `
+                <div class="clin-item full">
+                  <span class="clin-label">${escapeHtml(s.titulo)}${s.obrigatorio ? ' *' : ''}</span>
+                  <span class="clin-value">${escapeHtml(ficha.dados[s.id]) || '—'}</span>
                 </div>
               `).join('')}
             </div>
@@ -9579,7 +9896,7 @@ function pode(acao) {
         <div style="display:flex;align-items:center;gap:10px;">
           <button class="btn btn-ghost btn-sm" id="btnVoltarVisFicha"><i class="ti ti-arrow-left"></i> Voltar</button>
           <span style="color:var(--ac-line-strong);">/</span>
-          <span style="font-size:13.5px;color:var(--ac-charcoal-soft);">${escapeHtml(contextoLabel || 'Fichas de UTI')}</span>
+          <span style="font-size:13.5px;color:var(--ac-charcoal-soft);">${escapeHtml(contextoLabel || 'Fichas')}</span>
         </div>
         <button class="btn btn-accent" id="btnBaixarPdfFicha"><i class="ti ti-printer"></i> Baixar em PDF</button>
       </div>
@@ -9597,6 +9914,8 @@ function pode(acao) {
 
   /* ══════════════════════ VIEW DO ALUNO ══════════════════════ */
 
+  let currentSubtab = 'pacientes';
+  let currentPacienteId = null;
   let currentFichaId = null;
 
   function renderFichasClinicasAlunoView(container) {
@@ -9605,20 +9924,241 @@ function pode(acao) {
       container.innerHTML = '<div class="card card-pad"><p>Sessão inválida. Faça login novamente.</p></div>';
       return;
     }
+    currentPacienteId = null;
     currentFichaId = null;
-    paintListaAluno(container);
+    paintShell(container);
   }
 
-  function htmlCardFichaAluno(f) {
-    const nome = f.dados.nomePaciente ? escapeHtml(f.dados.nomePaciente) : '(sem nome do paciente)';
+  function paintShell(container) {
+    container.innerHTML = `
+      <div class="config-subtabs">
+        <button type="button" class="config-subtab ${currentSubtab === 'pacientes' ? 'active' : ''}" data-subtab="pacientes"><i class="ti ti-users"></i> Cadastro de pacientes</button>
+        <button type="button" class="config-subtab ${currentSubtab === 'lancamento' ? 'active' : ''}" data-subtab="lancamento"><i class="ti ti-clipboard-plus"></i> Lançamento de ficha</button>
+      </div>
+      <div id="fichasSubtabContent"></div>
+    `;
+
+    $all('.config-subtab', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentSubtab = btn.dataset.subtab;
+        currentPacienteId = null;
+        paintShell(container);
+      });
+    });
+
+    const content = $('#fichasSubtabContent', container);
+    if (currentSubtab === 'pacientes') paintPacientesLista(content);
+    else paintLancamentoLista(content);
+  }
+
+  /* ── Sub-aba: Cadastro de pacientes ── */
+
+  function htmlCardPaciente(p) {
+    return `
+      <div class="card card-pad">
+        <div style="font-weight:700;font-size:14px;">${escapeHtml(p.nome)}</div>
+        <div style="font-size:12.5px;color:var(--ac-charcoal-soft);margin-top:3px;">
+          ${infoPacienteLinha(p) || 'Sem idade/sexo informados'}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button class="btn btn-ghost btn-sm paciente-editar" data-id="${p.id}"><i class="ti ti-edit"></i> Editar</button>
+          <button class="btn btn-ghost btn-sm paciente-excluir" data-id="${p.id}" style="color:var(--ac-danger);"><i class="ti ti-trash"></i> Excluir</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function paintPacientesLista(content) {
+    const sess = session_get();
+    const pacientes = pacientes_doAluno(sess.alunoId);
+
+    content.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;margin-bottom:1.25rem;">
+        <div>
+          <h2 style="margin-bottom:2px;">Pacientes cadastrados</h2>
+          <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Cadastre aqui os pacientes que você vai acompanhar. Depois, use "Lançamento de ficha" para criar fichas para cada um.</p>
+        </div>
+        <button class="btn btn-accent" id="btnNovoPaciente"><i class="ti ti-plus"></i> Novo paciente</button>
+      </div>
+
+      ${pacientes.length === 0 ? `
+        <div class="card card-pad" style="text-align:center;padding:3rem 1rem;">
+          <i class="ti ti-user-off" style="font-size:2.5rem;color:var(--ac-charcoal-soft);display:block;margin-bottom:1rem;opacity:.45;"></i>
+          <p style="color:var(--ac-charcoal-soft);margin:0;">Nenhum paciente cadastrado ainda.</p>
+        </div>
+      ` : `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;">
+          ${pacientes.map(htmlCardPaciente).join('')}
+        </div>
+      `}
+    `;
+
+    $('#btnNovoPaciente', content).addEventListener('click', () => {
+      abrirModalPaciente(null, () => paintPacientesLista(content));
+    });
+    $all('.paciente-editar', content).forEach(btn => {
+      btn.addEventListener('click', () => {
+        abrirModalPaciente(paciente_get(btn.dataset.id), () => paintPacientesLista(content));
+      });
+    });
+    $all('.paciente-excluir', content).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = paciente_delete(btn.dataset.id);
+        if (r.ok) { showToast('Paciente excluído.', 'success'); paintPacientesLista(content); }
+        else abrirModalAviso('Não é possível excluir', r.msg);
+      });
+    });
+  }
+
+  function abrirModalPaciente(pacienteExistente, onSalvo) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:420px;">
+        <div class="modal-head">
+          <h3>${pacienteExistente ? 'Editar paciente' : 'Novo paciente'}</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label>Nome do paciente</label>
+            <input type="text" id="pacNomeInput" value="${escapeHtml(pacienteExistente ? pacienteExistente.nome : '')}">
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label>Idade</label>
+              <input type="text" id="pacIdadeInput" value="${escapeHtml(pacienteExistente ? pacienteExistente.idade : '')}">
+            </div>
+            <div class="field">
+              <label>Sexo</label>
+              <input type="text" id="pacSexoInput" value="${escapeHtml(pacienteExistente ? pacienteExistente.sexo : '')}">
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-primary" data-act="confirm"><i class="ti ti-device-floppy"></i> Salvar</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
+      const dados = {
+        nome: overlay.querySelector('#pacNomeInput').value,
+        idade: overlay.querySelector('#pacIdadeInput').value,
+        sexo: overlay.querySelector('#pacSexoInput').value
+      };
+      const sess = session_get();
+      const r = pacienteExistente ? paciente_update(pacienteExistente.id, dados) : paciente_create(sess.alunoId, dados);
+      if (r.ok) { close(); showToast('Paciente salvo.', 'success'); onSalvo(); }
+      else showToast(r.msg, 'danger');
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  /* ── Sub-aba: Lançamento de ficha ── */
+
+  function htmlCardPacientePasta(p) {
+    const fichas = fichasClinicas_doPaciente(p.id);
+    const integradas = fichas.filter(f => f.status === 'integrada').length;
+    return `
+      <div class="card card-pad paciente-pasta-card" data-id="${p.id}" style="cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:.6rem;">
+          <i class="ti ti-folder" style="font-size:22px;color:#2563EB;"></i>
+          <div style="min-width:0;">
+            <div style="font-weight:700;font-size:14px;">${escapeHtml(p.nome)}</div>
+            <div style="font-size:11.5px;color:var(--ac-charcoal-soft);">${infoPacienteLinha(p)}</div>
+          </div>
+        </div>
+        <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:10px;">
+          ${fichas.length} ficha${fichas.length === 1 ? '' : 's'} · ${integradas} integrada${integradas === 1 ? '' : 's'}
+        </div>
+      </div>
+    `;
+  }
+
+  function paintLancamentoLista(content) {
+    const sess = session_get();
+    const pacientes = pacientes_doAluno(sess.alunoId);
+
+    content.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;margin-bottom:1.25rem;">
+        <div>
+          <h2 style="margin-bottom:2px;">Lançamento de ficha</h2>
+          <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Selecione um paciente cadastrado para abrir a pasta dele e lançar quantas fichas quiser.</p>
+        </div>
+        <button class="btn btn-accent" id="btnLancarFicha" ${pacientes.length === 0 ? 'disabled title="Cadastre um paciente primeiro"' : ''}><i class="ti ti-folder-plus"></i> Lançar ficha</button>
+      </div>
+
+      ${pacientes.length === 0 ? `
+        <div class="card card-pad" style="text-align:center;padding:3rem 1rem;">
+          <i class="ti ti-folder-off" style="font-size:2.5rem;color:var(--ac-charcoal-soft);display:block;margin-bottom:1rem;opacity:.45;"></i>
+          <p style="color:var(--ac-charcoal-soft);margin:0;">Nenhum paciente cadastrado ainda. Cadastre um em "Cadastro de pacientes" primeiro.</p>
+        </div>
+      ` : `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;">
+          ${pacientes.map(htmlCardPacientePasta).join('')}
+        </div>
+      `}
+    `;
+
+    const btnLancar = $('#btnLancarFicha', content);
+    if (btnLancar && pacientes.length) {
+      btnLancar.addEventListener('click', () => abrirModalEscolherPaciente(content, pacientes));
+    }
+    $all('.paciente-pasta-card', content).forEach(card => {
+      card.addEventListener('click', () => {
+        currentPacienteId = card.dataset.id;
+        paintPastaPaciente(content);
+      });
+    });
+  }
+
+  function abrirModalEscolherPaciente(content, pacientes) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:420px;">
+        <div class="modal-head">
+          <h3>Lançar ficha</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="field" style="margin-bottom:0;">
+            <label>Selecione o paciente</label>
+            <select id="selPacienteLancar">
+              ${pacientes.map(p => `<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-primary" data-act="confirm"><i class="ti ti-folder-plus"></i> Criar pasta do paciente</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
+      currentPacienteId = overlay.querySelector('#selPacienteLancar').value;
+      close();
+      paintPastaPaciente(content);
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  function htmlCardFicha(f) {
+    const modelo = fichaModelo_get(f.modeloId);
     const integrada = f.status === 'integrada';
     return `
       <div class="card card-pad ficha-clin-card" data-id="${f.id}" style="cursor:pointer;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;">
-          <div style="min-width:0;">
-            <div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${nome}</div>
-            <div style="font-size:12px;color:var(--ac-charcoal-soft);margin-top:2px;">${f.dados.leito ? 'Leito ' + escapeHtml(f.dados.leito) : 'Sem leito informado'}</div>
-          </div>
+          <div style="font-weight:700;font-size:13.5px;">${escapeHtml(modelo ? modelo.titulo : 'Modelo removido')}</div>
           <span class="badge ${integrada ? 'badge-success' : 'badge-neutral'}" style="font-size:10.5px;flex-shrink:0;white-space:nowrap;">
             <i class="ti ${integrada ? 'ti-lock' : 'ti-pencil'}"></i> ${integrada ? 'Integrada' : 'Rascunho'}
           </span>
@@ -9631,75 +10171,131 @@ function pode(acao) {
     `;
   }
 
-  function paintListaAluno(container) {
+  function paintPastaPaciente(content) {
+    const paciente = paciente_get(currentPacienteId);
+    if (!paciente) { paintLancamentoLista(content); return; }
     const sess = session_get();
-    const fichas = fichasClinicas_doAluno(sess.alunoId);
+    const fichas = fichasClinicas_doPaciente(paciente.id);
+    const modelosDisp = modelos_disponiveisParaAluno(sess.alunoId);
 
-    container.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;margin-bottom:1.25rem;">
-        <div>
-          <h2 style="margin-bottom:2px;">Fichas de Avaliação e Evolução — UTI Adulto</h2>
-          <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Crie quantas fichas quiser. Edite livremente enquanto estiverem em rascunho — depois de integrada, a ficha fica travada para sempre.</p>
+    content.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" id="btnVoltarLancamento"><i class="ti ti-arrow-left"></i> Voltar</button>
+        <span style="color:var(--ac-line-strong);">/</span>
+        <div style="flex:1;min-width:150px;">
+          <div style="font-weight:700;font-size:15px;"><i class="ti ti-folder" style="color:#2563EB;"></i> ${escapeHtml(paciente.nome)}</div>
+          <div style="font-size:11.5px;color:var(--ac-charcoal-soft);">${infoPacienteLinha(paciente)}</div>
         </div>
-        <button class="btn btn-accent" id="btnNovaFichaClin"><i class="ti ti-plus"></i> Nova ficha</button>
+        <button class="btn btn-accent btn-sm" id="btnNovaFichaPasta" ${modelosDisp.length === 0 ? 'disabled title="Nenhum modelo de ficha disponível para suas matérias"' : ''}><i class="ti ti-plus"></i> Nova ficha</button>
       </div>
+
+      ${modelosDisp.length === 0 ? `
+        <div class="card card-pad" style="background:var(--ac-warning-bg);border-color:var(--ac-warning);margin-bottom:1rem;">
+          <span style="font-size:12.5px;color:#78350F;">Nenhum modelo de ficha está disponível para as matérias em que você está inscrito(a) ainda. Peça ao professor para vincular uma ficha à sua matéria.</span>
+        </div>
+      ` : ''}
 
       ${fichas.length === 0 ? `
         <div class="card card-pad" style="text-align:center;padding:3rem 1rem;">
           <i class="ti ti-file-off" style="font-size:2.5rem;color:var(--ac-charcoal-soft);display:block;margin-bottom:1rem;opacity:.45;"></i>
-          <p style="color:var(--ac-charcoal-soft);margin:0;">Nenhuma ficha criada ainda.</p>
+          <p style="color:var(--ac-charcoal-soft);margin:0;">Nenhuma ficha lançada para este paciente ainda.</p>
         </div>
       ` : `
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;">
-          ${fichas.map(htmlCardFichaAluno).join('')}
+          ${fichas.map(htmlCardFicha).join('')}
         </div>
       `}
     `;
 
-    $('#btnNovaFichaClin', container).addEventListener('click', () => {
-      const r = fichaClinica_create(sess.alunoId);
-      if (r.ok) {
-        currentFichaId = r.ficha.id;
-        paintEditorAluno(container);
-      }
-    });
+    $('#btnVoltarLancamento', content).addEventListener('click', () => paintLancamentoLista(content));
 
-    $all('.ficha-clin-card', container).forEach(card => {
+    const btnNova = $('#btnNovaFichaPasta', content);
+    if (btnNova && modelosDisp.length) {
+      btnNova.addEventListener('click', () => {
+        if (modelosDisp.length === 1) {
+          criarFichaEAbrir(content, sess.alunoId, paciente.id, modelosDisp[0].id);
+        } else {
+          abrirModalEscolherModelo(modelosDisp, (modeloId) => criarFichaEAbrir(content, sess.alunoId, paciente.id, modeloId));
+        }
+      });
+    }
+
+    $all('.ficha-clin-card', content).forEach(card => {
       card.addEventListener('click', () => {
         currentFichaId = card.dataset.id;
         const ficha = fichaClinica_get(currentFichaId);
-        if (ficha.status === 'rascunho') paintEditorAluno(container);
-        else paintVisualizacao(container, currentFichaId, () => paintListaAluno(container), 'Fichas de UTI');
+        if (ficha.status === 'rascunho') paintEditorFicha(content);
+        else paintVisualizacao(content, currentFichaId, () => paintPastaPaciente(content), paciente.nome);
       });
     });
   }
 
-  function htmlCampoInput(campo, valor) {
-    const val = escapeHtml(valor || '');
-    if (campo.tipo === 'date') return `<input type="date" data-campo="${campo.id}" value="${val}">`;
-    if (campo.tipo === 'textarea') return `<textarea data-campo="${campo.id}" rows="2">${val}</textarea>`;
-    if (campo.tipo === 'textarea-lg') return `<textarea data-campo="${campo.id}" rows="5">${val}</textarea>`;
-    return `<input type="text" data-campo="${campo.id}" value="${val}">`;
+  function criarFichaEAbrir(content, alunoId, pacienteId, modeloId) {
+    const r = fichaClinica_create(alunoId, pacienteId, modeloId);
+    if (r.ok) {
+      currentFichaId = r.ficha.id;
+      paintEditorFicha(content);
+    } else {
+      showToast(r.msg, 'danger');
+    }
   }
 
-  function paintEditorAluno(container) {
+  function abrirModalEscolherModelo(modelos, onEscolher) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:420px;">
+        <div class="modal-head">
+          <h3>Nova ficha</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="field" style="margin-bottom:0;">
+            <label>Selecione o modelo de ficha</label>
+            <select id="selModeloFicha">
+              ${modelos.map(m => `<option value="${m.id}">${escapeHtml(m.titulo)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-primary" data-act="confirm"><i class="ti ti-plus"></i> Criar ficha</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
+      const modeloId = overlay.querySelector('#selModeloFicha').value;
+      close();
+      onEscolher(modeloId);
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  function paintEditorFicha(content) {
     const ficha = fichaClinica_get(currentFichaId);
-    if (!ficha) { paintListaAluno(container); return; }
+    if (!ficha) { paintPastaPaciente(content); return; }
     if (ficha.status !== 'rascunho') {
-      paintVisualizacao(container, currentFichaId, () => paintListaAluno(container), 'Fichas de UTI');
+      paintVisualizacao(content, currentFichaId, () => paintPastaPaciente(content));
       return;
     }
+    const modelo = fichaModelo_get(ficha.modeloId);
+    const paciente = paciente_get(ficha.pacienteId);
 
-    container.innerHTML = `
+    content.innerHTML = `
       <div class="report-toolbar no-print">
         <div style="display:flex;align-items:center;gap:10px;">
-          <button class="btn btn-ghost btn-sm" id="btnVoltarListaFicha"><i class="ti ti-arrow-left"></i> Voltar</button>
+          <button class="btn btn-ghost btn-sm" id="btnVoltarPasta"><i class="ti ti-arrow-left"></i> Voltar</button>
           <span style="color:var(--ac-line-strong);">/</span>
-          <span style="font-size:13.5px;color:var(--ac-charcoal-soft);">Fichas de UTI</span>
+          <span style="font-size:13.5px;color:var(--ac-charcoal-soft);">${escapeHtml(paciente ? paciente.nome : 'Paciente')}</span>
         </div>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-ghost" id="btnSalvarFichaClin"><i class="ti ti-device-floppy"></i> Salvar</button>
           <button class="btn btn-danger" id="btnIntegrarFichaClin"><i class="ti ti-lock"></i> Integrar</button>
+          <button class="btn btn-ghost" id="btnExcluirFichaClin" style="color:var(--ac-danger);"><i class="ti ti-trash"></i> Excluir</button>
         </div>
       </div>
 
@@ -9707,50 +10303,83 @@ function pode(acao) {
         <div style="display:flex;gap:.6rem;align-items:flex-start;">
           <i class="ti ti-info-circle" style="color:var(--ac-warning);font-size:18px;flex-shrink:0;margin-top:1px;"></i>
           <span style="font-size:12.5px;color:#78350F;line-height:1.5;">
-            Esta ficha ainda está em <strong>rascunho</strong> — edite e salve quantas vezes quiser. Ao clicar em <strong>Integrar</strong>, a versão final é enviada ao(à) professor(a) e não pode mais ser editada.
+            Esta ficha ainda está em <strong>rascunho</strong> — edite e salve quantas vezes quiser. Campos marcados com <strong>*</strong> são obrigatórios e precisam estar preenchidos antes de integrar. Ao integrar, a versão final é enviada ao(à) professor(a) e não pode mais ser editada.
           </span>
         </div>
       </div>
 
       <div class="card card-pad" id="fichaClinFormCard">
-        ${FICHA_CLINICA_SECOES.map(sec => `
+        <h2 style="margin:0 0 1.2rem;font-size:16px;">${escapeHtml(modelo ? modelo.titulo : 'Ficha')}</h2>
+        ${(modelo ? modelo.topicos : []).map(t => `
           <div style="margin-bottom:1.6rem;">
-            <h3 style="font-size:15px;margin:0 0 .8rem;padding-bottom:6px;border-bottom:1px solid var(--ac-line);">${escapeHtml(sec.titulo)}</h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem 1.2rem;">
-              ${sec.campos.map(c => `
-                <div class="field" style="margin-bottom:0;${c.full ? 'grid-column:1/-1;' : ''}">
-                  <label>${escapeHtml(c.label)}</label>
-                  ${htmlCampoInput(c, ficha.dados[c.id])}
-                </div>
-              `).join('')}
-            </div>
+            <h3 style="font-size:15px;margin:0 0 .8rem;padding-bottom:6px;border-bottom:1px solid var(--ac-line);">${escapeHtml(t.titulo)}</h3>
+            ${t.subtopicos.map(s => `
+              <div class="field">
+                <label>${escapeHtml(s.titulo)}${s.obrigatorio ? ' <span style="color:var(--ac-danger);">*</span>' : ''}</label>
+                <textarea data-campo="${s.id}" rows="2">${escapeHtml(ficha.dados[s.id] || '')}</textarea>
+              </div>
+            `).join('')}
           </div>
         `).join('')}
       </div>
     `;
 
-    $('#btnVoltarListaFicha', container).addEventListener('click', () => paintListaAluno(container));
+    $('#btnVoltarPasta', content).addEventListener('click', () => paintPastaPaciente(content));
 
     function coletarDados() {
       const dados = {};
-      $all('[data-campo]', container).forEach(el => { dados[el.dataset.campo] = el.value; });
+      $all('[data-campo]', content).forEach(el => { dados[el.dataset.campo] = el.value; });
       return dados;
     }
 
-    $('#btnSalvarFichaClin', container).addEventListener('click', () => {
+    $('#btnSalvarFichaClin', content).addEventListener('click', () => {
       const r = fichaClinica_update(currentFichaId, coletarDados());
       if (r.ok) showToast('Ficha salva.', 'success');
       else showToast(r.msg, 'danger');
     });
 
-    $('#btnIntegrarFichaClin', container).addEventListener('click', () => {
-      // salva o que estiver digitado antes de abrir a confirmação
+    $('#btnExcluirFichaClin', content).addEventListener('click', () => {
+      abrirModalConfirmarExclusaoFicha(content);
+    });
+
+    $('#btnIntegrarFichaClin', content).addEventListener('click', () => {
       fichaClinica_update(currentFichaId, coletarDados());
-      abrirModalConfirmarIntegracao(container);
+      abrirModalConfirmarIntegracao(content, paciente ? paciente.nome : '');
     });
   }
 
-  function abrirModalConfirmarIntegracao(container) {
+  function abrirModalConfirmarExclusaoFicha(content) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:420px;">
+        <div class="modal-head">
+          <h3>Excluir ficha</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <p style="margin:0;color:var(--ac-charcoal-soft);">Esta ficha em rascunho será excluída permanentemente. Deseja continuar?</p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-danger" data-act="confirm"><i class="ti ti-trash"></i> Excluir</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
+      const r = fichaClinica_delete(currentFichaId);
+      close();
+      if (r.ok) { showToast('Ficha excluída.', 'success'); paintPastaPaciente(content); }
+      else showToast(r.msg, 'danger');
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  function abrirModalConfirmarIntegracao(content, nomePaciente) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
@@ -9782,7 +10411,7 @@ function pode(acao) {
       close();
       if (r.ok) {
         showToast('Ficha integrada com sucesso.', 'success');
-        paintVisualizacao(container, currentFichaId, () => paintListaAluno(container), 'Fichas de UTI');
+        paintVisualizacao(content, currentFichaId, () => paintPastaPaciente(content), nomePaciente);
       } else {
         showToast(r.msg, 'danger');
       }
@@ -9809,12 +10438,13 @@ function pode(acao) {
 
   function htmlCardFichaEquipe(f) {
     const aluno = alunos_get(f.alunoId);
-    const nomePaciente = f.dados.nomePaciente ? escapeHtml(f.dados.nomePaciente) : '(sem nome do paciente)';
+    const paciente = paciente_get(f.pacienteId);
+    const modelo = fichaModelo_get(f.modeloId);
     return `
       <div class="card card-pad ficha-clin-card" data-id="${f.id}" style="cursor:pointer;">
         <div style="font-weight:700;font-size:14px;">${escapeHtml(aluno ? aluno.nome : 'Aluno(a) removido(a)')}</div>
         <div style="font-size:12px;color:var(--ac-charcoal-soft);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-          ${nomePaciente}${f.dados.leito ? ' · Leito ' + escapeHtml(f.dados.leito) : ''}
+          ${escapeHtml(paciente ? paciente.nome : '(paciente removido)')} · ${escapeHtml(modelo ? modelo.titulo : 'Modelo removido')}
         </div>
         <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:10px;">
           Criada em ${fmtDataHora(f.criadoEm)}<br>Integrada em ${fmtDataHora(f.integradoEm)}
@@ -9828,7 +10458,7 @@ function pode(acao) {
 
     container.innerHTML = `
       <div style="margin-bottom:1.25rem;">
-        <h2 style="margin-bottom:2px;">Fichas de UTI integradas pelos alunos</h2>
+        <h2 style="margin-bottom:2px;">Fichas integradas pelos alunos</h2>
         <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Somente fichas já integradas (versão final, travada) aparecem aqui, com o registro de quando foram criadas e integradas.</p>
       </div>
 
@@ -9846,13 +10476,327 @@ function pode(acao) {
 
     $all('.ficha-clin-card', container).forEach(card => {
       card.addEventListener('click', () => {
-        paintVisualizacao(container, card.dataset.id, () => paintListaEquipe(container), 'Fichas de UTI — equipe');
+        paintVisualizacao(container, card.dataset.id, () => paintListaEquipe(container), 'Fichas — equipe');
       });
     });
   }
 
   window.AvaliaClinViews.fichasClinicas = renderFichasClinicasAlunoView;
   window.AvaliaClinViews.fichasClinicasEquipe = renderFichasClinicasEquipeView;
+})();
+</script>
+
+<script>
+/* ============================================================
+   Avalix — "Cadastrar ficha": modelos de ficha configuráveis pelo
+   professor (views-ficha-modelos.js)
+
+   Plugado em window.AvaliaClinViews.fichaModelos.
+
+   O professor cria/edita modelos com título + tópicos (seções) +
+   subtópicos (campos, marcáveis como obrigatórios), vinculando cada
+   modelo a uma ou mais matérias que ele supervisiona. Um modelo só
+   fica disponível para o aluno lançar uma ficha nova se o aluno
+   estiver inscrito em alguma dessas matérias.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  window.AvaliaClinViews = window.AvaliaClinViews || {};
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $all(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+  function fmtData(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('pt-BR'); } catch (e) { return iso; }
+  }
+
+  let draftModelo = null;   // { id?, titulo, materiasIds:[], topicos:[{id,titulo,subtopicos:[{id,titulo,obrigatorio}]}] }
+  let editingModeloId = null;
+
+  function renderFichaModelosView(container) {
+    const session = session_get();
+    const isAdmin = session && session.papel === 'admin';
+    const podeGerenciar = session && (session.papel === 'admin' || session.papel === 'professor');
+    if (!podeGerenciar) {
+      container.innerHTML =
+        '<div class="card card-pad">' +
+        '<div class="eyebrow" style="margin-bottom:8px;color:var(--ac-danger);">Acesso restrito</div>' +
+        '<h2>Apenas administradores e professores cadastram fichas</h2>' +
+        '</div>';
+      return;
+    }
+    draftModelo = null;
+    editingModeloId = null;
+    paintLista(container);
+  }
+
+  function paintLista(container) {
+    const session = session_get();
+    const isAdmin = session.papel === 'admin';
+    const modelos = fichaModelos_doProfessor(session.id, isAdmin);
+
+    container.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;margin-bottom:1.25rem;">
+        <div>
+          <h2 style="margin-bottom:2px;">Modelos de ficha</h2>
+          <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Crie o título e os tópicos/subtópicos que o aluno vai preencher, e vincule a ficha a uma ou mais matérias — só quem está nelas poderá lançá-la.</p>
+        </div>
+        <button class="btn btn-accent" id="btnNovoModelo"><i class="ti ti-plus"></i> Nova ficha</button>
+      </div>
+
+      ${modelos.length === 0 ? `
+        <div class="card card-pad" style="text-align:center;padding:3rem 1rem;">
+          <i class="ti ti-file-off" style="font-size:2.5rem;color:var(--ac-charcoal-soft);display:block;margin-bottom:1rem;opacity:.45;"></i>
+          <p style="color:var(--ac-charcoal-soft);margin:0;">Nenhum modelo de ficha cadastrado ainda.</p>
+        </div>
+      ` : `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1rem;">
+          ${modelos.map(m => htmlCardModelo(m)).join('')}
+        </div>
+      `}
+    `;
+
+    $('#btnNovoModelo', container).addEventListener('click', () => {
+      draftModelo = { titulo: '', materiasIds: [], topicos: [fichaModelo_topicoVazio()] };
+      editingModeloId = null;
+      paintEditor(container);
+    });
+
+    $all('.modelo-card-editar', container).forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const modelo = fichaModelo_get(btn.dataset.id);
+        editingModeloId = modelo.id;
+        draftModelo = JSON.parse(JSON.stringify({ titulo: modelo.titulo, materiasIds: modelo.materiasIds, topicos: modelo.topicos }));
+        paintEditor(container);
+      });
+    });
+
+    $all('.modelo-card-excluir', container).forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        confirmarExclusao(btn.dataset.id, container);
+      });
+    });
+  }
+
+  function htmlCardModelo(m) {
+    const materias = (m.materiasIds || []).map(id => materia_get(id)).filter(Boolean);
+    const totalSub = (m.topicos || []).reduce((s, t) => s + (t.subtopicos || []).length, 0);
+    return `
+      <div class="card card-pad">
+        <div style="font-weight:700;font-size:14.5px;margin-bottom:4px;">${escapeHtml(m.titulo)}</div>
+        <div style="font-size:12px;color:var(--ac-charcoal-soft);margin-bottom:8px;">
+          ${(m.topicos || []).length} tópico${(m.topicos || []).length === 1 ? '' : 's'} · ${totalSub} campo${totalSub === 1 ? '' : 's'}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;">
+          ${materias.length
+            ? materias.map(mt => `<span class="badge badge-neutral" style="font-size:10.5px;">${escapeHtml(mt.nome)}</span>`).join('')
+            : '<span class="badge badge-warning" style="font-size:10.5px;">Sem matéria vinculada — nenhum aluno vê ainda</span>'
+          }
+        </div>
+        <div style="font-size:11px;color:var(--ac-charcoal-soft);margin-bottom:10px;">Atualizado em ${fmtData(m.atualizadoEm)}</div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost btn-sm modelo-card-editar" data-id="${m.id}"><i class="ti ti-edit"></i> Editar</button>
+          <button class="btn btn-ghost btn-sm modelo-card-excluir" data-id="${m.id}" style="color:var(--ac-danger);"><i class="ti ti-trash"></i> Excluir</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function confirmarExclusao(modeloId, container) {
+    const modelo = fichaModelo_get(modeloId);
+    if (!modelo) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:440px;">
+        <div class="modal-head">
+          <h3>Excluir modelo de ficha</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <p style="margin:0;color:var(--ac-charcoal-soft);">Tem certeza que deseja excluir "<strong>${escapeHtml(modelo.titulo)}</strong>"? Esta ação não pode ser desfeita.</p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-danger" data-act="confirm"><i class="ti ti-trash"></i> Excluir</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
+      const r = fichaModelo_delete(modeloId);
+      close();
+      if (r.ok) { showToast('Modelo excluído.', 'success'); paintLista(container); }
+      else showToast(r.msg, 'danger');
+    });
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+  }
+
+  /* ── Editor (criar/editar) ── */
+
+  function syncDraftFromDom(container) {
+    const tituloEl = $('#modeloTituloInput', container);
+    if (tituloEl) draftModelo.titulo = tituloEl.value;
+
+    $all('[data-topico-titulo]', container).forEach(el => {
+      const t = draftModelo.topicos.find(x => x.id === el.dataset.topicoTitulo);
+      if (t) t.titulo = el.value;
+    });
+    $all('[data-sub-titulo]', container).forEach(el => {
+      draftModelo.topicos.forEach(t => {
+        const s = t.subtopicos.find(x => x.id === el.dataset.subTitulo);
+        if (s) s.titulo = el.value;
+      });
+    });
+    $all('[data-sub-obrigatorio]', container).forEach(el => {
+      draftModelo.topicos.forEach(t => {
+        const s = t.subtopicos.find(x => x.id === el.dataset.subObrigatorio);
+        if (s) s.obrigatorio = el.checked;
+      });
+    });
+    $all('[data-materia-check]', container).forEach(el => {
+      const mid = el.dataset.materiaCheck;
+      const idx = draftModelo.materiasIds.indexOf(mid);
+      if (el.checked && idx === -1) draftModelo.materiasIds.push(mid);
+      if (!el.checked && idx !== -1) draftModelo.materiasIds.splice(idx, 1);
+    });
+  }
+
+  function htmlSubtopico(topicoId, s) {
+    return `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:.5rem;">
+        <input type="text" data-sub-titulo="${s.id}" placeholder="Nome do campo (ex: Nome do paciente)" value="${escapeHtml(s.titulo)}" style="flex:1;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;color:var(--ac-charcoal-soft);">
+          <input type="checkbox" data-sub-obrigatorio="${s.id}" ${s.obrigatorio ? 'checked' : ''}> Obrigatório
+        </label>
+        <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="remove-subtopico" data-topico-id="${topicoId}" data-subtopico-id="${s.id}" title="Remover campo"><i class="ti ti-x"></i></button>
+      </div>
+    `;
+  }
+
+  function htmlTopico(t) {
+    return `
+      <div class="card card-pad" style="margin-bottom:1rem;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:.9rem;">
+          <input type="text" data-topico-titulo="${t.id}" placeholder="Título do tópico (ex: Avaliação cardiovascular)" value="${escapeHtml(t.titulo)}" style="flex:1;font-weight:700;">
+          <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="remove-topico" data-topico-id="${t.id}" title="Remover tópico"><i class="ti ti-trash"></i></button>
+        </div>
+        <div class="subtopicos-wrap" data-topico-subs="${t.id}">
+          ${t.subtopicos.map(s => htmlSubtopico(t.id, s)).join('')}
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" data-action="add-subtopico" data-topico-id="${t.id}"><i class="ti ti-plus"></i> Adicionar subtópico</button>
+      </div>
+    `;
+  }
+
+  function paintEditor(container) {
+    const session = session_get();
+    const isAdmin = session.papel === 'admin';
+    const materiasDisp = isAdmin ? materias_list() : materias_visiveisParaProfessor(session.id);
+
+    container.innerHTML = `
+      <div class="report-toolbar no-print">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn btn-ghost btn-sm" id="btnVoltarModelos"><i class="ti ti-arrow-left"></i> Voltar</button>
+          <span style="color:var(--ac-line-strong);">/</span>
+          <span style="font-size:13.5px;color:var(--ac-charcoal-soft);">${editingModeloId ? 'Editar' : 'Nova'} ficha</span>
+        </div>
+        <button class="btn btn-accent" id="btnSalvarModelo"><i class="ti ti-device-floppy"></i> Salvar</button>
+      </div>
+
+      <div class="card card-pad" style="margin-bottom:1.25rem;">
+        <div class="field">
+          <label>Título da ficha</label>
+          <input type="text" id="modeloTituloInput" placeholder="Ex: Ficha de Avaliação e Evolução Fisioterapêutica" value="${escapeHtml(draftModelo.titulo)}">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>Vincular a matérias — o aluno só verá esta ficha se estiver numa delas</label>
+          ${materiasDisp.length === 0 ? `
+            <div class="field-hint">Você ainda não supervisiona nenhuma matéria. Vincule-se a uma em "Pesos e critérios" → Matérias antes de publicar esta ficha.</div>
+          ` : `
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+              ${materiasDisp.map(m => `
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--ac-sand);padding:6px 10px;border-radius:8px;cursor:pointer;">
+                  <input type="checkbox" data-materia-check="${m.id}" ${draftModelo.materiasIds.includes(m.id) ? 'checked' : ''}>
+                  ${escapeHtml(m.nome)}
+                </label>
+              `).join('')}
+            </div>
+          `}
+        </div>
+      </div>
+
+      <div id="topicosWrap">
+        ${draftModelo.topicos.map(t => htmlTopico(t)).join('')}
+      </div>
+      <button type="button" class="btn btn-ghost" id="btnAddTopico" style="margin-bottom:1.5rem;"><i class="ti ti-plus"></i> Adicionar tópico</button>
+    `;
+
+    $('#btnVoltarModelos', container).addEventListener('click', () => paintLista(container));
+
+    $('#btnAddTopico', container).addEventListener('click', () => {
+      syncDraftFromDom(container);
+      draftModelo.topicos.push(fichaModelo_topicoVazio());
+      paintEditor(container);
+    });
+
+    $all('[data-action="remove-topico"]', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncDraftFromDom(container);
+        draftModelo.topicos = draftModelo.topicos.filter(t => t.id !== btn.dataset.topicoId);
+        paintEditor(container);
+      });
+    });
+
+    $all('[data-action="add-subtopico"]', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncDraftFromDom(container);
+        const t = draftModelo.topicos.find(x => x.id === btn.dataset.topicoId);
+        if (t) t.subtopicos.push(fichaModelo_subtopicoVazio());
+        paintEditor(container);
+      });
+    });
+
+    $all('[data-action="remove-subtopico"]', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncDraftFromDom(container);
+        const t = draftModelo.topicos.find(x => x.id === btn.dataset.topicoId);
+        if (t) t.subtopicos = t.subtopicos.filter(s => s.id !== btn.dataset.subtopicoId);
+        paintEditor(container);
+      });
+    });
+
+    $('#btnSalvarModelo', container).addEventListener('click', () => {
+      syncDraftFromDom(container);
+      const payload = {
+        titulo: draftModelo.titulo,
+        materiasIds: draftModelo.materiasIds,
+        topicos: draftModelo.topicos
+      };
+      const r = editingModeloId
+        ? fichaModelo_update(editingModeloId, payload)
+        : fichaModelo_create(payload);
+      if (r.ok) {
+        showToast(editingModeloId ? 'Ficha atualizada.' : 'Ficha criada.', 'success');
+        paintLista(container);
+      } else {
+        showToast(r.msg, 'danger');
+      }
+    });
+  }
+
+  window.AvaliaClinViews.fichaModelos = renderFichaModelosView;
 })();
 </script>
 
