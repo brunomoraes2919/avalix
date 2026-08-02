@@ -218,7 +218,7 @@ input::placeholder, textarea::placeholder { color: #B3ABA0; }
 .input-icon-wrap { position: relative; }
 .input-icon-wrap input { padding-left: 2.4rem; }
 .input-icon-wrap input[type="password"],
-.input-icon-wrap input[type="text"] { padding-right: 2.4rem; }
+.input-icon-wrap input[type="text"] { padding-right: 2.65rem; }
 .input-icon-wrap i {
   position: absolute;
   left: 0.85rem;
@@ -226,22 +226,37 @@ input::placeholder, textarea::placeholder { color: #B3ABA0; }
   transform: translateY(-50%);
   color: #A39A8C;
   font-size: 17px;
+  pointer-events: none;
 }
 .input-icon-wrap .toggle-pass {
   position: absolute;
-  right: 0.5rem;
+  right: 0.55rem;
   top: 50%;
   transform: translateY(-50%);
   left: auto;
   cursor: pointer;
   background: none;
   border: none;
-  padding: 4px;
+  padding: 6px;
+  margin: 0;
+  border-radius: 6px;
   color: #A39A8C;
-  font-size: 17px;
+  font-size: 16px;
   display: flex;
   align-items: center;
+  justify-content: center;
   line-height: 1;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.input-icon-wrap .toggle-pass i {
+  position: static;
+  transform: none;
+  font-size: 16px;
+  pointer-events: none;
+}
+.input-icon-wrap .toggle-pass:hover {
+  color: var(--ac-charcoal);
+  background-color: rgba(15, 23, 42, 0.06);
 }
 
 /* ============================================================
@@ -842,6 +857,38 @@ a:focus-visible {
 .cenario-tab .cenario-tab-duplicate:hover { color: var(--ac-terracotta-dark); }
 .cenario-tab .cenario-tab-delete:hover { color: var(--ac-danger); }
 .cenario-tab .cenario-tab-edit:hover { color: var(--ac-ink); }
+
+/* ============================================================
+   Sub-abas da tela "Pesos e critérios"
+   ============================================================ */
+
+.config-subtabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 2px solid var(--ac-line);
+  margin-bottom: 1.5rem;
+}
+.config-subtab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.75rem 1.1rem;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ac-charcoal-soft);
+  border-bottom: 2.5px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+.config-subtab i { font-size: 17px; }
+.config-subtab:hover { color: var(--ac-charcoal); }
+.config-subtab.active { color: var(--ac-terracotta-dark); border-color: var(--ac-terracotta); }
+.config-subpanel.hidden { display: none; }
 
 /* ============================================================
    Notificações (sino no topbar)
@@ -4956,6 +5003,17 @@ function pode(acao) {
 
   let currentCenarioId = null;
 
+  /* Lembra qual sub-aba de "Pesos e critérios" está ativa, já que várias
+     ações (salvar matéria, editar cenário, etc.) re-renderizam a view
+     inteira — sem isso, o usuário voltaria sempre para "Regras gerais". */
+  const CONFIG_SUBTABS = [
+    { id: 'gerais',      label: 'Regras gerais',        icone: 'ti-adjustments-horizontal' },
+    { id: 'identidade',  label: 'Identidade visual',    icone: 'ti-photo' },
+    { id: 'materias',    label: 'Matérias',             icone: 'ti-books' },
+    { id: 'cenarios',    label: 'Cenários de estágio',  icone: 'ti-clipboard-list' }
+  ];
+  let currentConfigSubtab = 'gerais';
+
   /* Mostra um aviso extra sempre que uma ação deixar (ou mantiver) um
      cenário em modo rascunho — a soma dos pesos dos blocos + prova
      teórica não bate com a escala máxima, então ele não pode ser
@@ -4980,28 +5038,41 @@ function pode(acao) {
       return;
     }
 
+    const subtabsHtml = CONFIG_SUBTABS.map(t => `
+      <button type="button" class="config-subtab ${t.id === currentConfigSubtab ? 'active' : ''}" data-subtab="${t.id}">
+        <i class="ti ${t.icone}"></i> ${escapeHtml(t.label)}
+      </button>
+    `).join('');
+
     container.innerHTML = `
-      <div id="cfgGeraisCard"></div>
-      <div style="height:1.25rem;"></div>
-      <div id="cfgIdentidadeCard"></div>
-      <div style="height:1.5rem;"></div>
+      <div class="config-subtabs" id="cfgSubtabs">${subtabsHtml}</div>
 
-      <!-- Card de Matérias -->
-      <div id="cfgMateriasCard"></div>
-      <div style="height:1.5rem;"></div>
-
-      <div class="card card-pad" style="margin-bottom:1.25rem;">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;margin-bottom:1rem;">
-          <div>
-            <h2 style="margin-bottom:2px;">Cenários de estágio</h2>
-            <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Cada cenário define blocos, critérios e quinzenas de avaliação. Agrupe cenários em matérias acima.</p>
-          </div>
-          <button class="btn btn-accent" id="btnNovoCenario"><i class="ti ti-plus"></i> Novo cenário</button>
-        </div>
-        <div id="cfgCenariosTabs" class="cenario-tabs"></div>
+      <div class="config-subpanel ${currentConfigSubtab === 'gerais' ? '' : 'hidden'}" data-panel="gerais">
+        <div id="cfgGeraisCard"></div>
       </div>
 
-      <div id="cfgCenarioBlocosWrap"></div>
+      <div class="config-subpanel ${currentConfigSubtab === 'identidade' ? '' : 'hidden'}" data-panel="identidade">
+        <div id="cfgIdentidadeCard"></div>
+      </div>
+
+      <div class="config-subpanel ${currentConfigSubtab === 'materias' ? '' : 'hidden'}" data-panel="materias">
+        <div id="cfgMateriasCard"></div>
+      </div>
+
+      <div class="config-subpanel ${currentConfigSubtab === 'cenarios' ? '' : 'hidden'}" data-panel="cenarios">
+        <div class="card card-pad" style="margin-bottom:1.25rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;margin-bottom:1rem;">
+            <div>
+              <h2 style="margin-bottom:2px;">Cenários de estágio</h2>
+              <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Cada cenário define blocos, critérios e quinzenas de avaliação. Agrupe cenários em matérias acima.</p>
+            </div>
+            <button class="btn btn-accent" id="btnNovoCenario"><i class="ti ti-plus"></i> Novo cenário</button>
+          </div>
+          <div id="cfgCenariosTabs" class="cenario-tabs"></div>
+        </div>
+
+        <div id="cfgCenarioBlocosWrap"></div>
+      </div>
     `;
 
     renderGeraisCard(container);
@@ -5011,6 +5082,17 @@ function pode(acao) {
     renderCenarioBlocosSection(container);
 
     $('#btnNovoCenario', container).addEventListener('click', () => openCenarioModal(null, container));
+
+    /* Navegação entre sub-abas — troca só a visibilidade dos painéis,
+       sem re-renderizar nada, e lembra a escolha em currentConfigSubtab
+       para sobreviver a re-renders disparados por outras ações. */
+    $all('.config-subtab', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentConfigSubtab = btn.dataset.subtab;
+        $all('.config-subtab', container).forEach(b => b.classList.toggle('active', b === btn));
+        $all('.config-subpanel', container).forEach(p => p.classList.toggle('hidden', p.dataset.panel !== currentConfigSubtab));
+      });
+    });
   }
 
 
