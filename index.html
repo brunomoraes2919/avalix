@@ -3938,6 +3938,16 @@ function paciente_delete(id) {
 
 /* ══ Fichas clínicas (lançadas pelo aluno, por paciente + modelo) ══ */
 
+/* Detecta subtópicos que só duplicam o nome do paciente (já cadastrado
+   em "Cadastro de pacientes") — esses campos não são mais mostrados
+   no formulário nem no PDF; o valor é sempre puxado automaticamente
+   do cadastro do paciente. */
+function fichaSubtopico_ehNomePaciente(titulo) {
+  const t = String(titulo || '').trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return t === 'nome do paciente' || t === 'nome paciente' || t === 'paciente';
+}
+
 function fichaClinica_dadosVaziosDoModelo(modelo) {
   const dados = {};
   (modelo.topicos || []).forEach(t => (t.subtopicos || []).forEach(s => { dados[s.id] = ''; }));
@@ -3968,16 +3978,25 @@ function fichasClinicas_doPaciente(pacienteId) {
 function fichaClinica_create(alunoId, pacienteId, modeloId) {
   const modelo = fichaModelo_get(modeloId);
   if (!modelo) return { ok: false, msg: 'Modelo de ficha não encontrado.' };
+  const paciente = paciente_get(pacienteId);
   const db = db_load();
   if (!Array.isArray(db.fichasClinicas)) db.fichasClinicas = [];
   const agora = new Date().toISOString();
+  const dados = fichaClinica_dadosVaziosDoModelo(modelo);
+  // Campos que só duplicam o nome do paciente já cadastrado são
+  // preenchidos automaticamente — o aluno não digita de novo.
+  if (paciente) {
+    (modelo.topicos || []).forEach(t => (t.subtopicos || []).forEach(s => {
+      if (fichaSubtopico_ehNomePaciente(s.titulo)) dados[s.id] = paciente.nome;
+    }));
+  }
   const ficha = {
     id: uid('ficha_clin'),
     alunoId,
     pacienteId,
     modeloId,
     status: 'rascunho',
-    dados: fichaClinica_dadosVaziosDoModelo(modelo),
+    dados,
     criadoEm: agora,
     atualizadoEm: agora,
     integradoEm: null
@@ -3995,6 +4014,15 @@ function fichaClinica_update(id, dadosParciais) {
   if (!ficha) return { ok: false, msg: 'Ficha não encontrada.' };
   if (ficha.status !== 'rascunho') return { ok: false, msg: 'Esta ficha já foi integrada e não pode mais ser editada.' };
   ficha.dados = Object.assign({}, ficha.dados, dadosParciais);
+  // Mantém sempre sincronizado com o cadastro do paciente (cobre
+  // fichas antigas e o caso de o paciente ter sido renomeado depois).
+  const modelo = fichaModelo_get(ficha.modeloId);
+  const paciente = paciente_get(ficha.pacienteId);
+  if (modelo && paciente) {
+    (modelo.topicos || []).forEach(t => (t.subtopicos || []).forEach(s => {
+      if (fichaSubtopico_ehNomePaciente(s.titulo)) ficha.dados[s.id] = paciente.nome;
+    }));
+  }
   ficha.atualizadoEm = new Date().toISOString();
   db_save(db);
   return { ok: true, ficha };
@@ -4002,16 +4030,21 @@ function fichaClinica_update(id, dadosParciais) {
 
 /* Lista os subtópicos obrigatórios do modelo de uma ficha que ainda
    estão vazios — usado para bloquear a integração até tudo estar
-   preenchido. */
+   preenchido. Campos de nome-do-paciente são considerados preenchidos
+   automaticamente (vêm do cadastro do paciente). */
 function fichaClinica_obrigatoriosPendentes(ficha) {
   const modelo = fichaModelo_get(ficha.modeloId);
   if (!modelo) return [];
+  const paciente = paciente_get(ficha.pacienteId);
   const pendentes = [];
   (modelo.topicos || []).forEach(t => {
     (t.subtopicos || []).forEach(s => {
-      if (s.obrigatorio && !(ficha.dados[s.id] || '').toString().trim()) {
-        pendentes.push(s.titulo);
+      if (!s.obrigatorio) return;
+      if (fichaSubtopico_ehNomePaciente(s.titulo)) {
+        if (!paciente || !(paciente.nome || '').trim()) pendentes.push(s.titulo);
+        return;
       }
+      if (!(ficha.dados[s.id] || '').toString().trim()) pendentes.push(s.titulo);
     });
   });
   return pendentes;
@@ -9853,11 +9886,14 @@ function pode(acao) {
           <div class="meta-item"><span class="meta-label">Ficha integrada em</span><span class="meta-value">${fmtDataHora(ficha.integradoEm)}</span></div>
         </div>
 
-        ${(modelo ? modelo.topicos : []).map(t => `
+        ${(modelo ? modelo.topicos : []).map(t => {
+          const subs = (t.subtopicos || []).filter(s => !fichaSubtopico_ehNomePaciente(s.titulo));
+          if (!subs.length) return '';
+          return `
           <div class="report-clin-secao">
             <h4>${escapeHtml(t.titulo)}</h4>
             <div class="report-clin-grid">
-              ${t.subtopicos.map(s => `
+              ${subs.map(s => `
                 <div class="clin-item full">
                   <span class="clin-label">${escapeHtml(s.titulo)}${s.obrigatorio ? ' *' : ''}</span>
                   <span class="clin-value">${escapeHtml(ficha.dados[s.id]) || '—'}</span>
@@ -9865,7 +9901,8 @@ function pode(acao) {
               `).join('')}
             </div>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
 
         <div class="report-signatures">
           <div class="sig-line">
@@ -10310,17 +10347,21 @@ function pode(acao) {
 
       <div class="card card-pad" id="fichaClinFormCard">
         <h2 style="margin:0 0 1.2rem;font-size:16px;">${escapeHtml(modelo ? modelo.titulo : 'Ficha')}</h2>
-        ${(modelo ? modelo.topicos : []).map(t => `
+        ${(modelo ? modelo.topicos : []).map(t => {
+          const subs = (t.subtopicos || []).filter(s => !fichaSubtopico_ehNomePaciente(s.titulo));
+          if (!subs.length) return '';
+          return `
           <div style="margin-bottom:1.6rem;">
             <h3 style="font-size:15px;margin:0 0 .8rem;padding-bottom:6px;border-bottom:1px solid var(--ac-line);">${escapeHtml(t.titulo)}</h3>
-            ${t.subtopicos.map(s => `
+            ${subs.map(s => `
               <div class="field">
                 <label>${escapeHtml(s.titulo)}${s.obrigatorio ? ' <span style="color:var(--ac-danger);">*</span>' : ''}</label>
                 <textarea data-campo="${s.id}" rows="2">${escapeHtml(ficha.dados[s.id] || '')}</textarea>
               </div>
             `).join('')}
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     `;
 
