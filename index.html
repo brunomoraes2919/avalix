@@ -3415,6 +3415,107 @@ function calc_avaliacao(avaliacao) {
   };
 }
 
+
+/* ══ Avaliação qualitativa semanal (Ruim/Regular/Bom) ═══════════
+   Usada na tela do aluno para não expor a nota numérica: cada
+   quinzena é classificada pelo % lançado NAQUELA semana em relação
+   ao máximo possível dos blocos do cenário (a prova teórica não
+   entra, pois não é lançada por quinzena). A classificação nunca
+   usa a média final — sempre a nota daquela semana específica.
+   <33,33% = Ruim · 33,33–66,66% = Regular · >66,66% = Bom
+═══════════════════════════════════════════════════════════════ */
+function calc_qualitativo(pct) {
+  if (pct == null || isNaN(pct)) return null;
+  if (pct < 1/3) return 'ruim';
+  if (pct < 2/3) return 'regular';
+  return 'bom';
+}
+
+/* % de aproveitamento de UM cenário em UMA quinzena específica
+   (soma das médias de cada bloco naquela coluna / soma dos
+   pesoMaximo dos blocos). Retorna null se nada foi lançado ainda. */
+function calc_cenarioSemanaPct(cenario, notas, quinzenaIdx) {
+  const blocos = cenario.blocos || [];
+  const maxBlocos = blocos.reduce((s, b) => s + (Number(b.pesoMaximo) || 0), 0);
+  if (maxBlocos <= 0) return null;
+  let soma = 0, preencheu = false;
+  blocos.forEach(bloco => {
+    // Verifica nas células brutas se ALGO foi lançado nessa quinzena
+    // (blocos "soma" retornam 0 — não null — quando vazios, então não
+    // dá pra confiar no resultado de calc_blocoQuinzena para detectar
+    // se a semana já foi avaliada; checamos os valores originais).
+    const algumPreenchido = (bloco.criterios || []).some(c => calc_isNumeric((notas[c.id] || {})[quinzenaIdx]));
+    if (algumPreenchido) {
+      preencheu = true;
+      const v = calc_blocoQuinzena(bloco, notas, quinzenaIdx);
+      soma += (v === null ? 0 : v);
+    }
+  });
+  if (!preencheu) return null;
+  return soma / maxBlocos;
+}
+
+/* Avaliação qualitativa semana a semana de UM cenário (usa a ficha
+   mais recente finalizada do aluno nesse cenário; sem finalizada,
+   usa a mais recente em rascunho — mesmo critério do calc_materia). */
+function calc_cenario_semanal(cenarioId, alunoId) {
+  const cenario = cenario_get(cenarioId);
+  if (!cenario) return [];
+  const avs = avaliacoes_list().filter(a => a.alunoId === alunoId && a.cenarioId === cenarioId);
+  if (!avs.length) return [];
+  const fins = avs.filter(a => a.status === 'finalizada');
+  const base = fins.length
+    ? fins.sort((a,b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm))[0]
+    : avs.sort((a,b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm))[0];
+  const quinzenas = cenario.quinzenas || [];
+  return quinzenas.map((label, i) => {
+    const pct = calc_cenarioSemanaPct(cenario, base.notas, i);
+    return { label, pct, qual: calc_qualitativo(pct) };
+  });
+}
+
+/* Avaliação qualitativa semana a semana de uma MATÉRIA: pondera os
+   cenários pelo peso configurado na matéria, semana a semana (mesmo
+   índice de quinzena). Assume que os cenários de uma mesma matéria
+   compartilham os mesmos períodos; usa a lista de quinzenas mais
+   longa entre eles para os rótulos exibidos. */
+function calc_materia_semanal(materiaId, alunoId) {
+  const materia = materia_get(materiaId);
+  if (!materia) return [];
+  const cenItems = materia.cenarios || [];
+  const cenDatas = [];
+  let labelsRef = [];
+
+  cenItems.forEach(mc => {
+    const cenario = cenario_get(mc.cenarioId);
+    if (!cenario) return;
+    const avs = avaliacoes_list().filter(a => a.alunoId === alunoId && a.cenarioId === mc.cenarioId);
+    if (!avs.length) return;
+    const fins = avs.filter(a => a.status === 'finalizada');
+    const base = fins.length
+      ? fins.sort((a,b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm))[0]
+      : avs.sort((a,b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm))[0];
+    const quinzenas = cenario.quinzenas || [];
+    if (quinzenas.length > labelsRef.length) labelsRef = quinzenas;
+    cenDatas.push({ peso: Number(mc.peso || 0), cenario, notas: base.notas, quinzenasCount: quinzenas.length });
+  });
+
+  if (!cenDatas.length) return [];
+
+  return labelsRef.map((label, i) => {
+    let somaPeso = 0, somaPct = 0;
+    cenDatas.forEach(cd => {
+      if (i >= cd.quinzenasCount) return;
+      const pct = calc_cenarioSemanaPct(cd.cenario, cd.notas, i);
+      if (pct === null) return;
+      somaPct  += pct * cd.peso;
+      somaPeso += cd.peso;
+    });
+    const pctFinal = somaPeso > 0 ? somaPct / somaPeso : null;
+    return { label, pct: pctFinal, qual: calc_qualitativo(pctFinal) };
+  });
+}
+
 /* ---------- Permissões ---------- */
 const PAPEIS = {
   admin:       { label: 'Administrador', nivel: 3 },
@@ -8569,6 +8670,55 @@ function pode(acao) {
   }
   function cor(nota, max) { return max > 0 ? corPct(nota / max) : '#64748B'; }
 
+  /* ── Avaliação qualitativa (Ruim/Regular/Bom) ──────────────
+     Usada no lugar da nota numérica. Reflete a nota de cada
+     quinzena isoladamente — nunca a média final. */
+  const QUAL_INFO = {
+    ruim:    { label: 'Ruim',    bg: '#FEE2E2', cor: '#DC2626' },
+    regular: { label: 'Regular', bg: '#FEF3C7', cor: '#B45309' },
+    bom:     { label: 'Bom',     bg: '#DCFCE7', cor: '#16A34A' }
+  };
+  const QUAL_VAZIO = { label: '—', bg: '#F1F5F9', cor: '#94A3B8' };
+
+  function qualInfo(qual) { return qual ? (QUAL_INFO[qual] || QUAL_VAZIO) : QUAL_VAZIO; }
+
+  /* Pílula grande (destaque) com a avaliação qualitativa mais recente */
+  function htmlQualDestaque(qual) {
+    const info = qualInfo(qual);
+    return `
+      <div style="font-size:1.6rem;font-weight:700;line-height:1;color:${info.cor};">${esc(info.label)}</div>
+      <div style="font-size:12px;color:var(--ac-charcoal-soft);">última quinzena avaliada</div>
+    `;
+  }
+
+  /* Linha do tempo com uma pílula por quinzena */
+  function htmlQualTimeline(semanas, tituloLinha) {
+    if (!semanas || !semanas.length) return '';
+    return `
+      <div style="margin-top:1rem;">
+        <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-bottom:6px;">${esc(tituloLinha || 'Avaliação qualitativa por quinzena')}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:.6rem;">
+          ${semanas.map(s => {
+            const info = qualInfo(s.qual);
+            return `
+              <div style="display:flex;flex-direction:column;align-items:center;gap:4px;min-width:76px;">
+                <span style="display:inline-block;background:${info.bg};color:${info.cor};font-size:11px;font-weight:700;padding:4px 11px;border-radius:20px;">${esc(info.label)}</span>
+                <span style="font-size:10px;color:var(--ac-charcoal-soft);text-align:center;line-height:1.25;">${esc(s.label)}</span>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  }
+
+  /* Última quinzena que já teve nota lançada (para destaque no cabeçalho) */
+  function ultimoQualPreenchido(semanas) {
+    if (!semanas) return null;
+    for (let i = semanas.length - 1; i >= 0; i--) {
+      if (semanas[i].qual) return semanas[i].qual;
+    }
+    return null;
+  }
+
   /* ── Engine de insights ─────────────────────────────────── */
   function gerarInsights(avaliacoes, cenario, cfg) {
     /* 1. Mapear performance por critério */
@@ -8712,14 +8862,13 @@ function pode(acao) {
 
   /* ── Matéria (wrapper com nota ponderada + sub-cenários) ── */
   function htmlMateria(materia, cenMap, cfg) {
-    const calcMat = calc_materia(materia.id, session_get().alunoId);
+    const alunoId = session_get().alunoId;
+    const calcMat = calc_materia(materia.id, alunoId);
     if (!calcMat || !calcMat.porCenario.length) return '';
 
-    const notaM   = calcMat.notaFinal;
-    const pctBar  = Math.min(100, notaM / cfg.escalaMaxima * 100).toFixed(1);
-    const pctMeta = (cfg.notaCorte / cfg.escalaMaxima * 100).toFixed(1);
-    const corN    = cor(notaM, cfg.escalaMaxima);
-    const isApto  = notaM >= cfg.notaCorte;
+    const isApto    = calcMat.notaFinal >= cfg.notaCorte;
+    const semanas   = calc_materia_semanal(materia.id, alunoId);
+    const qualUltima = ultimoQualPreenchido(semanas);
 
     const cenHtml = (materia.cenarios || [])
       .filter(mc => cenMap[mc.cenarioId])
@@ -8738,32 +8887,19 @@ function pode(acao) {
                 <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:#2563EB;font-weight:700;margin-bottom:3px;">Matéria</div>
                 <h2 style="margin:0 0 .4rem;font-size:1.4rem;">${esc(materia.nome)}</h2>
                 <div style="font-size:12.5px;color:var(--ac-charcoal-soft);">
-                  Nota final = média ponderada de ${calcMat.porCenario.length} cenário${calcMat.porCenario.length > 1 ? 's' : ''}
+                  Avaliação qualitativa ponderada de ${calcMat.porCenario.length} cenário${calcMat.porCenario.length > 1 ? 's' : ''}
                   &nbsp;·&nbsp;
                   ${calcMat.porCenario.map(p => `${esc(p.cenarioNome)} (${(p.peso*100).toFixed(0)}%)`).join(' + ')}
                 </div>
               </div>
               <div style="text-align:right;flex-shrink:0;">
-                <div style="font-size:3rem;font-weight:700;line-height:1;color:${corN};">${num(notaM)}</div>
-                <div style="font-size:12px;color:var(--ac-charcoal-soft);">de ${cfg.escalaMaxima} pontos</div>
+                ${htmlQualDestaque(qualUltima)}
                 <span class="badge ${calcMat.isParcial ? 'badge-warning' : isApto ? 'badge-success' : 'badge-danger'}" style="margin-top:5px;font-size:12px;">
                   ${calcMat.isParcial ? '⏳ PARCIAL' : isApto ? '✓ APTO' : '✗ INAPTO'}
                 </span>
               </div>
             </div>
-            <div style="margin-top:1rem;">
-              <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ac-charcoal-soft);margin-bottom:5px;">
-                <span>Nota da matéria</span>
-                <span>${pctBar}% &nbsp;|&nbsp; Meta: ${pctMeta}% (nota ${cfg.notaCorte})</span>
-              </div>
-              <div style="height:12px;border-radius:6px;background:var(--ac-sand-dark);overflow:hidden;position:relative;">
-                <div style="height:100%;width:${pctBar}%;background:${corN};border-radius:6px;transition:width .5s;"></div>
-                <div style="position:absolute;top:0;bottom:0;left:${pctMeta}%;width:2.5px;background:#F59E0B;"></div>
-              </div>
-              <div style="font-size:11px;color:#B45309;margin-top:3px;">
-                <span style="display:inline-block;width:10px;height:3px;background:#F59E0B;border-radius:2px;margin-right:3px;vertical-align:middle;"></span>Linha amarela = nota de corte (${cfg.notaCorte})
-              </div>
-            </div>
+            ${htmlQualTimeline(semanas, 'Avaliação qualitativa da matéria por quinzena')}
             ${calcMat.isParcial ? `
             <div style="margin-top:.75rem;padding:.65rem .9rem;border-radius:8px;background:#FEF3C7;border:1px solid #F59E0B;display:flex;align-items:center;gap:.6rem;">
               <i class="ti ti-info-circle" style="color:#B45309;font-size:16px;flex-shrink:0;"></i>
@@ -8794,12 +8930,11 @@ function pode(acao) {
     const notaM    = temFinal
       ? media(fins.map(av => calc_avaliacao(av).notaFinal))
       : calc.notaFinal;
-    const pctBarra = Math.min(100, (notaM / cfg.escalaMaxima * 100)).toFixed(1);
-    const pctMeta  = (cfg.notaCorte / cfg.escalaMaxima * 100).toFixed(1);
-    const corNota  = cor(notaM, cfg.escalaMaxima);
     const isApto   = notaM >= cfg.notaCorte;
     // resultado parcial: existe ao menos uma avaliação em andamento ou nenhuma finalizada
     const isParcial = !temFinal || avaliacoes.some(a => a.status !== 'finalizada');
+    const semanas    = calc_cenario_semanal(cenarioId, avaliacoes[0].alunoId);
+    const qualUltima = ultimoQualPreenchido(semanas);
 
     /* insights */
     const insights = gerarInsights(avaliacoes, cenario, cfg);
@@ -8828,8 +8963,7 @@ function pode(acao) {
               </div>
             </div>
             <div style="text-align:right;flex-shrink:0;">
-              <div style="font-size:2.75rem;font-weight:700;line-height:1;color:${corNota};">${num(notaM)}</div>
-              <div style="font-size:12px;color:var(--ac-charcoal-soft);">de ${cfg.escalaMaxima} pontos</div>
+              ${htmlQualDestaque(qualUltima)}
               ${isParcial
                 ? `<span class="badge badge-warning" style="margin-top:5px;font-size:12px;" title="Resultado parcial — a avaliação ainda está em andamento">
                      ⏳ PARCIAL
@@ -8841,19 +8975,8 @@ function pode(acao) {
             </div>
           </div>
 
-          <!-- Barra de progresso com linha de meta -->
+          ${htmlQualTimeline(semanas, 'Avaliação qualitativa por quinzena')}
           <div style="margin-top:1rem;">
-            <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ac-charcoal-soft);margin-bottom:5px;">
-              <span>Seu progresso</span>
-              <span>${pctBarra}% &nbsp;|&nbsp; Meta: ${pctMeta}% (nota ${cfg.notaCorte})</span>
-            </div>
-            <div style="height:12px;border-radius:6px;background:var(--ac-sand-dark);overflow:hidden;position:relative;">
-              <div style="height:100%;width:${pctBarra}%;background:${corNota};border-radius:6px;transition:width .5s;"></div>
-              <div style="position:absolute;top:0;bottom:0;left:${pctMeta}%;width:2.5px;background:#F59E0B;" title="Nota de corte: ${cfg.notaCorte}"></div>
-            </div>
-            <div style="font-size:11px;color:#B45309;margin-top:3px;">
-              <span style="display:inline-block;width:10px;height:3px;background:#F59E0B;border-radius:2px;margin-right:3px;vertical-align:middle;"></span>Linha amarela = nota de corte (${cfg.notaCorte})
-            </div>
             ${isParcial ? `
             <div style="margin-top:.75rem;padding:.65rem .9rem;border-radius:8px;background:#FEF3C7;border:1px solid #F59E0B;display:flex;align-items:center;gap:.6rem;">
               <i class="ti ti-info-circle" style="color:#B45309;font-size:16px;flex-shrink:0;"></i>
