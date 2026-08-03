@@ -10267,6 +10267,11 @@ function pode(acao) {
           Criada em ${fmtData(f.criadoEm)} · Atualizada em ${fmtData(f.atualizadoEm)}
           ${integrada ? '<br>Integrada em ' + fmtDataHora(f.integradoEm) : ''}
         </div>
+        ${integrada ? '' : `
+          <div style="margin-top:10px;">
+            <button type="button" class="btn btn-ghost btn-sm ficha-card-excluir" data-id="${f.id}" style="color:var(--ac-danger);"><i class="ti ti-trash"></i> Excluir</button>
+          </div>
+        `}
       </div>
     `;
   }
@@ -10326,6 +10331,13 @@ function pode(acao) {
         const ficha = fichaClinica_get(currentFichaId);
         if (ficha.status === 'rascunho') paintEditorFicha(content);
         else paintVisualizacao(content, currentFichaId, () => paintPastaPaciente(content), paciente.nome);
+      });
+    });
+
+    $all('.ficha-card-excluir', content).forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        abrirModalConfirmarExclusaoFicha(content, btn.dataset.id, () => paintPastaPaciente(content));
       });
     });
   }
@@ -10443,7 +10455,7 @@ function pode(acao) {
     });
 
     $('#btnExcluirFichaClin', content).addEventListener('click', () => {
-      abrirModalConfirmarExclusaoFicha(content);
+      abrirModalConfirmarExclusaoFicha(content, currentFichaId, () => paintPastaPaciente(content));
     });
 
     $('#btnIntegrarFichaClin', content).addEventListener('click', () => {
@@ -10452,7 +10464,7 @@ function pode(acao) {
     });
   }
 
-  function abrirModalConfirmarExclusaoFicha(content) {
+  function abrirModalConfirmarExclusaoFicha(content, fichaId, onExcluida) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
@@ -10474,9 +10486,9 @@ function pode(acao) {
     overlay.querySelector('.modal-close').addEventListener('click', close);
     overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
     overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
-      const r = fichaClinica_delete(currentFichaId);
+      const r = fichaClinica_delete(fichaId);
       close();
-      if (r.ok) { showToast('Ficha excluída.', 'success'); paintPastaPaciente(content); }
+      if (r.ok) { showToast('Ficha excluída.', 'success'); onExcluida(); }
       else showToast(r.msg, 'danger');
     });
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
