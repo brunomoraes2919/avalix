@@ -5966,7 +5966,7 @@ function pode(acao) {
           const soma = materia_somaPesos(m);
           const ok   = materia_pesosOk(m);
           const somaPct = (soma * 100).toFixed(0);
-          const bgAlternado = matIdx % 2 === 0 ? 'var(--ac-paper)' : 'var(--ac-sand)';
+          const bgAlternado = matIdx % 2 === 0 ? 'var(--ac-paper)' : 'var(--ac-terracotta-light)';
           return `
           <div class="materia-item" data-mat-id="${m.id}" style="border:1px solid ${ok ? 'var(--ac-line)' : '#F59E0B'};border-radius:var(--radius-md);margin-bottom:1rem;overflow:hidden;background:${bgAlternado};">
             <!-- Header da matéria -->
@@ -6751,7 +6751,7 @@ function pode(acao) {
         ? bloco.criterios.reduce((acc, c) => acc + (Number(c.pesoItem) || 0), 0)
         : null;
       const pesoOk = bloco.tipo !== 'soma' || Math.abs(somaPesoItens - bloco.pesoMaximo) < 0.001;
-      const bgBloco = idx % 2 === 0 ? 'var(--ac-paper)' : 'var(--ac-sand)';
+      const bgBloco = idx % 2 === 0 ? 'var(--ac-paper)' : 'var(--ac-terracotta-light)';
 
       return `
         <div class="card" style="margin-bottom:1rem;background:${bgBloco};" data-bloco-id="${bloco.id}">
