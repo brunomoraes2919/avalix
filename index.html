@@ -60,6 +60,8 @@ html, body {
   font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  width: 100%;
 }
 
 h1, h2, h3, h4 {
@@ -604,7 +606,10 @@ input::placeholder, textarea::placeholder { color: #B3ABA0; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 10px;
 }
+.topbar-right { flex-wrap: wrap; row-gap: 8px; }
 .topbar h1 { font-size: 21px; margin: 0; }
 .topbar .topbar-sub { font-size: 13px; color: var(--ac-charcoal-soft); margin-top: 2px; }
 
@@ -781,9 +786,60 @@ table.data-table tbody tr:hover { background: var(--ac-sand); }
   .sidebar.open { transform: translateX(0); }
 
   .topbar { padding: 0.9rem 1.1rem; }
+  .topbar-right { gap: 8px; }
   .content-area { padding: 1.1rem; }
   .modal-body, .modal-head, .modal-foot { padding-left: 1.1rem; padding-right: 1.1rem; }
   .dash-2col { grid-template-columns: 1fr !important; }
+}
+
+/* ============================================================
+   Responsividade adicional — telas pequenas (celular)
+   Tabelas ganham rolagem horizontal própria (em vez de espremer
+   colunas ou vazar da tela), grids de cards reduzem a largura
+   mínima de cada item, e o topbar libera espaço escondendo textos
+   auxiliares quando o espaço é curto.
+   ============================================================ */
+@media screen and (max-width: 680px) {
+  table.data-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+  table.data-table th,
+  table.data-table td { white-space: nowrap; }
+
+  /* iOS Safari dá zoom automático em qualquer campo com fonte menor
+     que 16px ao tocar — trava o app inteiro num zoom indesejado a
+     cada toque em um input. Só se aplica no mobile pra não alterar
+     o visual mais compacto do desktop. */
+  input[type="text"], input[type="email"], input[type="password"],
+  input[type="number"], input[type="date"], select, textarea {
+    font-size: 16px;
+  }
+
+  /* Área de toque mais confortável em telas de celular/tablet. */
+  .btn { min-height: 42px; }
+  .btn-sm { min-height: 36px; }
+  .btn-icon, .btn-sm.btn-icon { width: 38px; height: 38px; min-height: 0; }
+
+  /* Grids de cards (pacientes, fichas, matérias-equipe, alunos-equipe
+     etc.) — reduz a largura mínima de cada item para caber com
+     folga em telas de celular sem forçar rolagem horizontal. */
+  [style*="repeat(auto-fill,minmax(260px"],
+  [style*="repeat(auto-fill, minmax(260px"] { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)) !important; }
+  [style*="repeat(auto-fill,minmax(240px"],
+  [style*="repeat(auto-fill, minmax(240px"] { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)) !important; }
+  [style*="repeat(auto-fill,minmax(280px"],
+  [style*="repeat(auto-fill, minmax(280px"] { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)) !important; }
+}
+
+@media screen and (max-width: 480px) {
+  .semestre-filtro-label { display: none; }
+  .semestre-filtro-wrap select#semestreFiltroGlobal { max-width: 118px; }
+  .topbar h1 { font-size: 18px; }
+  .role-chip { font-size: 10px; padding: 3px 7px; }
+  .metric-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important; }
 }
 
 @media screen and (max-width: 520px) {
@@ -1211,6 +1267,11 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
   .report-signatures,
   .report-clin-grid { grid-template-columns: 1fr; }
   .report-header .ficha-titulo { white-space: normal; }
+  table.report-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 @media print {
@@ -1433,7 +1494,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
 
   <div class="main-area">
     <header class="topbar">
-      <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+      <div class="topbar-left" style="display:flex;align-items:center;gap:12px;min-width:0;">
         <button class="btn-hamburger" id="btnMobileMenu" aria-label="Abrir menu de navegação" aria-expanded="false" aria-controls="appSidebar">
           <i class="ti ti-menu-2"></i>
         </button>
@@ -1442,9 +1503,9 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
           <div class="topbar-sub" id="viewSubtitle">Visão geral da plataforma</div>
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div class="no-print" style="display:flex;align-items:center;gap:6px;">
-          <label for="semestreFiltroGlobal" style="font-size:11.5px;color:var(--ac-charcoal-soft);white-space:nowrap;">Semestre</label>
+      <div class="topbar-right" style="display:flex;align-items:center;gap:12px;">
+        <div class="no-print semestre-filtro-wrap" style="display:flex;align-items:center;gap:6px;">
+          <label for="semestreFiltroGlobal" class="semestre-filtro-label" style="font-size:11.5px;color:var(--ac-charcoal-soft);white-space:nowrap;">Semestre</label>
           <select id="semestreFiltroGlobal" style="font-size:12.5px;padding:5px 8px;border-radius:8px;max-width:150px;"></select>
         </div>
         <div class="notif-wrap no-print" id="notifWrap">
