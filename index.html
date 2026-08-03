@@ -2013,7 +2013,12 @@ function buildSeed() {
         topicos: FICHA_CLINICA_SECOES_LEGADO.map(sec => ({
           id: sec.id,
           titulo: sec.titulo,
-          subtopicos: sec.campos.map(c => ({ id: c.id, titulo: c.label, obrigatorio: c.id === 'nomePaciente' }))
+          subtopicos: sec.campos.map(c => ({
+            id: c.id,
+            titulo: c.label,
+            obrigatorio: c.id === 'nomePaciente',
+            tipo: c.tipo === 'date' ? 'data' : 'texto'
+          }))
         }))
       }
     ],
@@ -2334,7 +2339,12 @@ function db_migrate(data) {
         topicos: FICHA_CLINICA_SECOES_LEGADO.map(sec => ({
           id: sec.id,
           titulo: sec.titulo,
-          subtopicos: sec.campos.map(c => ({ id: c.id, titulo: c.label, obrigatorio: false }))
+          subtopicos: sec.campos.map(c => ({
+            id: c.id,
+            titulo: c.label,
+            obrigatorio: false,
+            tipo: c.tipo === 'date' ? 'data' : 'texto'
+          }))
         }))
       });
 
@@ -2362,6 +2372,20 @@ function db_migrate(data) {
     }
 
     data.version = 16; changed = true;
+  }
+
+  // v17 — tipo de campo (texto/data/número) em cada subtópico dos
+  // modelos de ficha. Modelos criados antes desta versão não tinham
+  // esse campo — assume 'texto' (comportamento anterior, textarea livre).
+  if (data.version < 17) {
+    (data.fichaModelos || []).forEach(m => {
+      (m.topicos || []).forEach(t => {
+        (t.subtopicos || []).forEach(s => {
+          if (!FICHA_TIPOS_CAMPO.includes(s.tipo)) s.tipo = 'texto';
+        });
+      });
+    });
+    data.version = 17; changed = true;
   }
   return changed;
 }
@@ -3786,11 +3810,16 @@ function modelos_disponiveisParaAluno(alunoId) {
   );
 }
 
+const FICHA_TIPOS_CAMPO = ['texto', 'data', 'numero'];
+function fichaModelo_normalizarTipo(tipo) {
+  return FICHA_TIPOS_CAMPO.includes(tipo) ? tipo : 'texto';
+}
+
 function fichaModelo_topicoVazio() {
   return { id: uid('topico'), titulo: '', subtopicos: [] };
 }
 function fichaModelo_subtopicoVazio() {
-  return { id: uid('subtopico'), titulo: '', obrigatorio: false };
+  return { id: uid('subtopico'), titulo: '', obrigatorio: false, tipo: 'texto' };
 }
 
 function fichaModelo_create(payload) {
@@ -3816,7 +3845,8 @@ function fichaModelo_create(payload) {
       subtopicos: (t.subtopicos || []).filter(s => (s.titulo || '').trim()).map(s => ({
         id: s.id || uid('subtopico'),
         titulo: s.titulo.trim(),
-        obrigatorio: !!s.obrigatorio
+        obrigatorio: !!s.obrigatorio,
+        tipo: fichaModelo_normalizarTipo(s.tipo)
       }))
     }))
   };
@@ -3843,7 +3873,8 @@ function fichaModelo_update(id, payload) {
     subtopicos: (t.subtopicos || []).filter(s => (s.titulo || '').trim()).map(s => ({
       id: s.id || uid('subtopico'),
       titulo: s.titulo.trim(),
-      obrigatorio: !!s.obrigatorio
+      obrigatorio: !!s.obrigatorio,
+      tipo: fichaModelo_normalizarTipo(s.tipo)
     }))
   }));
   modelo.atualizadoEm = new Date().toISOString();
@@ -3882,6 +3913,16 @@ function pacientes_doAluno(alunoId) {
     .sort((a, b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm));
 }
 
+/* Idade só aceita dígitos (o resto é descartado). Sexo só aceita
+   'Masculino' ou 'Feminino' — qualquer outro valor vira vazio. */
+function paciente_normalizarIdade(valor) {
+  return String(valor == null ? '' : valor).replace(/[^0-9]/g, '');
+}
+function paciente_normalizarSexo(valor) {
+  const v = String(valor || '').trim();
+  return (v === 'Masculino' || v === 'Feminino') ? v : '';
+}
+
 function paciente_create(alunoId, dados) {
   const db = db_load();
   if (!Array.isArray(db.pacientes)) db.pacientes = [];
@@ -3892,8 +3933,8 @@ function paciente_create(alunoId, dados) {
     id: uid('paciente'),
     alunoId,
     nome,
-    idade: (dados.idade || '').toString().trim(),
-    sexo: (dados.sexo || '').toString().trim(),
+    idade: paciente_normalizarIdade(dados.idade),
+    sexo: paciente_normalizarSexo(dados.sexo),
     criadoEm: agora,
     atualizadoEm: agora
   };
@@ -3909,8 +3950,8 @@ function paciente_update(id, dados) {
   const nome = (dados.nome || '').trim();
   if (!nome) return { ok: false, msg: 'Informe o nome do paciente.' };
   paciente.nome = nome;
-  paciente.idade = (dados.idade || '').toString().trim();
-  paciente.sexo = (dados.sexo || '').toString().trim();
+  paciente.idade = paciente_normalizarIdade(dados.idade);
+  paciente.sexo = paciente_normalizarSexo(dados.sexo);
   paciente.atualizadoEm = new Date().toISOString();
   db_save(db);
   return { ok: true, paciente };
@@ -9823,6 +9864,24 @@ function pode(acao) {
     if (!iso) return '—';
     try { return new Date(iso).toLocaleString('pt-BR'); } catch (e) { return iso; }
   }
+  /* Formata um valor de campo tipo "data" (string YYYY-MM-DD do input
+     nativo) sem passar por Date/fuso horário, pra não arriscar
+     deslocar o dia. */
+  function fmtDataCampo(v) {
+    if (!v) return '';
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : v;
+  }
+  function htmlCampoFicha(s, valorAtual) {
+    const tipo = s.tipo || 'texto';
+    if (tipo === 'data') {
+      return `<input type="date" data-campo="${s.id}" value="${escapeHtml(valorAtual || '')}">`;
+    }
+    if (tipo === 'numero') {
+      return `<input type="number" data-campo="${s.id}" value="${escapeHtml(valorAtual || '')}">`;
+    }
+    return `<textarea data-campo="${s.id}" rows="2">${escapeHtml(valorAtual || '')}</textarea>`;
+  }
   function infoPacienteLinha(p) {
     if (!p) return '';
     const partes = [];
@@ -9896,7 +9955,7 @@ function pode(acao) {
               ${subs.map(s => `
                 <div class="clin-item full">
                   <span class="clin-label">${escapeHtml(s.titulo)}${s.obrigatorio ? ' *' : ''}</span>
-                  <span class="clin-value">${escapeHtml(ficha.dados[s.id]) || '—'}</span>
+                  <span class="clin-value">${escapeHtml(s.tipo === 'data' ? fmtDataCampo(ficha.dados[s.id]) : ficha.dados[s.id]) || '—'}</span>
                 </div>
               `).join('')}
             </div>
@@ -10064,11 +10123,15 @@ function pode(acao) {
           <div class="field-row">
             <div class="field">
               <label>Idade</label>
-              <input type="text" id="pacIdadeInput" value="${escapeHtml(pacienteExistente ? pacienteExistente.idade : '')}">
+              <input type="number" min="0" step="1" id="pacIdadeInput" value="${escapeHtml(pacienteExistente ? pacienteExistente.idade : '')}">
             </div>
             <div class="field">
               <label>Sexo</label>
-              <input type="text" id="pacSexoInput" value="${escapeHtml(pacienteExistente ? pacienteExistente.sexo : '')}">
+              <select id="pacSexoInput">
+                <option value="" ${!pacienteExistente || !pacienteExistente.sexo ? 'selected' : ''}>Selecione</option>
+                <option value="Masculino" ${pacienteExistente && pacienteExistente.sexo === 'Masculino' ? 'selected' : ''}>Masculino</option>
+                <option value="Feminino" ${pacienteExistente && pacienteExistente.sexo === 'Feminino' ? 'selected' : ''}>Feminino</option>
+              </select>
             </div>
           </div>
         </div>
@@ -10356,7 +10419,7 @@ function pode(acao) {
             ${subs.map(s => `
               <div class="field">
                 <label>${escapeHtml(s.titulo)}${s.obrigatorio ? ' <span style="color:var(--ac-danger);">*</span>' : ''}</label>
-                <textarea data-campo="${s.id}" rows="2">${escapeHtml(ficha.dados[s.id] || '')}</textarea>
+                ${htmlCampoFicha(s, ficha.dados[s.id])}
               </div>
             `).join('')}
           </div>
@@ -10706,6 +10769,12 @@ function pode(acao) {
         if (s) s.obrigatorio = el.checked;
       });
     });
+    $all('[data-sub-tipo]', container).forEach(el => {
+      draftModelo.topicos.forEach(t => {
+        const s = t.subtopicos.find(x => x.id === el.dataset.subTipo);
+        if (s) s.tipo = el.value;
+      });
+    });
     $all('[data-materia-check]', container).forEach(el => {
       const mid = el.dataset.materiaCheck;
       const idx = draftModelo.materiasIds.indexOf(mid);
@@ -10715,9 +10784,15 @@ function pode(acao) {
   }
 
   function htmlSubtopico(topicoId, s) {
+    const tipo = s.tipo || 'texto';
     return `
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:.5rem;">
-        <input type="text" data-sub-titulo="${s.id}" placeholder="Nome do campo (ex: Nome do paciente)" value="${escapeHtml(s.titulo)}" style="flex:1;">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:.5rem;flex-wrap:wrap;">
+        <input type="text" data-sub-titulo="${s.id}" placeholder="Nome do campo (ex: Nome do paciente)" value="${escapeHtml(s.titulo)}" style="flex:1;min-width:160px;">
+        <select data-sub-tipo="${s.id}" style="width:auto;flex-shrink:0;" title="Tipo de caractere aceito neste campo">
+          <option value="texto" ${tipo === 'texto' ? 'selected' : ''}>Texto</option>
+          <option value="data" ${tipo === 'data' ? 'selected' : ''}>Data</option>
+          <option value="numero" ${tipo === 'numero' ? 'selected' : ''}>Número</option>
+        </select>
         <label style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;color:var(--ac-charcoal-soft);">
           <input type="checkbox" data-sub-obrigatorio="${s.id}" ${s.obrigatorio ? 'checked' : ''}> Obrigatório
         </label>
