@@ -5962,12 +5962,13 @@ function pode(acao) {
             ${isProfCfg ? 'Você ainda não foi vinculado(a) a nenhuma matéria neste semestre.' : 'Nenhuma matéria cadastrada neste semestre ainda.'}<br>
             <span style="font-size:13px;">${isProfCfg ? 'Peça ao administrador para vincular seu perfil às matérias em que você leciona.' : 'Crie uma matéria (ela entra no semestre selecionado no filtro do topo) e adicione os cenários e professores.'}</span>
           </div>
-        ` : materias.map(m => {
+        ` : materias.map((m, matIdx) => {
           const soma = materia_somaPesos(m);
           const ok   = materia_pesosOk(m);
           const somaPct = (soma * 100).toFixed(0);
+          const bgAlternado = matIdx % 2 === 0 ? 'var(--ac-paper)' : 'var(--ac-sand)';
           return `
-          <div class="materia-item" data-mat-id="${m.id}" style="border:1px solid ${ok ? 'var(--ac-line)' : '#F59E0B'};border-radius:var(--radius-md);margin-bottom:1rem;overflow:hidden;">
+          <div class="materia-item" data-mat-id="${m.id}" style="border:1px solid ${ok ? 'var(--ac-line)' : '#F59E0B'};border-radius:var(--radius-md);margin-bottom:1rem;overflow:hidden;background:${bgAlternado};">
             <!-- Header da matéria -->
             <div style="padding:.85rem 1.1rem;background:${ok ? 'var(--ac-sand)' : '#FEF3C7'};display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;">
               <div style="display:flex;align-items:center;gap:.6rem;flex:1;min-width:0;">
@@ -6750,9 +6751,10 @@ function pode(acao) {
         ? bloco.criterios.reduce((acc, c) => acc + (Number(c.pesoItem) || 0), 0)
         : null;
       const pesoOk = bloco.tipo !== 'soma' || Math.abs(somaPesoItens - bloco.pesoMaximo) < 0.001;
+      const bgBloco = idx % 2 === 0 ? 'var(--ac-paper)' : 'var(--ac-sand)';
 
       return `
-        <div class="card" style="margin-bottom:1rem;" data-bloco-id="${bloco.id}">
+        <div class="card" style="margin-bottom:1rem;background:${bgBloco};" data-bloco-id="${bloco.id}">
           <div style="padding:1.1rem 1.4rem;display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;border-bottom:1px solid var(--ac-line);">
             <div style="flex:1;">
               <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
