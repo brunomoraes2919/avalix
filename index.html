@@ -1408,7 +1408,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <button class="nav-item" data-view="alunos"><i class="ti ti-users"></i> Alunos</button>
       <button class="nav-item" data-view="avaliacoes"><i class="ti ti-clipboard-check"></i> Lançar notas</button>
       <button class="nav-item" data-view="relatorios"><i class="ti ti-file-report"></i> Relatórios em PDF</button>
-      <button class="nav-item" data-view="fichasClinicasEquipe"><i class="ti ti-file-description"></i> Fichas de UTI</button>
+      <button class="nav-item" data-view="fichasClinicasEquipe"><i class="ti ti-file-description"></i> Fichas</button>
       <button class="nav-item" data-view="fichaModelos"><i class="ti ti-forms"></i> Cadastrar ficha</button>
 
       <div class="nav-section-label" id="nav-section-admin">Administração</div>
@@ -3955,6 +3955,19 @@ function paciente_update(id, dados) {
   paciente.atualizadoEm = new Date().toISOString();
   db_save(db);
   return { ok: true, paciente };
+}
+
+/* Data da última atividade relacionada a um paciente — o mais recente
+   entre a última edição do cadastro do paciente e a última
+   atualização de qualquer ficha dele (criação, edição ou integração). */
+function paciente_ultimaAtividade(id) {
+  const paciente = paciente_get(id);
+  if (!paciente) return null;
+  let maisRecente = paciente.atualizadoEm;
+  fichasClinicas_doPaciente(id).forEach(f => {
+    if (new Date(f.atualizadoEm) > new Date(maisRecente)) maisRecente = f.atualizadoEm;
+  });
+  return maisRecente;
 }
 
 function paciente_temFichas(id) {
@@ -9049,7 +9062,7 @@ function pode(acao) {
     auditoria:      { title: 'Histórico',             sub: 'Registro de ações realizadas na plataforma' },
     aluno:          { title: 'Meu Desempenho',         sub: 'Suas fichas de avaliação e evolução nas práticas supervisionadas' },
     fichasClinicas: { title: 'Fichas', sub: 'Cadastre pacientes e lance quantas fichas quiser para cada um' },
-    fichasClinicasEquipe: { title: 'Fichas de UTI', sub: 'Fichas integradas pelos alunos, com registro de data e hora' },
+    fichasClinicasEquipe: { title: 'Fichas', sub: 'Fichas integradas pelos alunos, organizadas por matéria e por aluno' },
     fichaModelos: { title: 'Cadastrar ficha', sub: 'Crie modelos de ficha (tópicos e subtópicos) e vincule a matérias' }
   };
 
@@ -9890,6 +9903,19 @@ function pode(acao) {
     return partes.join(' · ');
   }
 
+  /* Mapa fichaId -> nº sequencial (1, 2, 3...) na ordem em que as
+     fichas de um paciente foram CRIADAS — independente da ordem de
+     exibição (que é por atualização mais recente). */
+  function numerarPorCriacao(fichas) {
+    const ordenadas = fichas.slice().sort((a, b) => new Date(a.criadoEm) - new Date(b.criadoEm));
+    const mapa = new Map();
+    ordenadas.forEach((f, i) => mapa.set(f.id, i + 1));
+    return mapa;
+  }
+  function numeroDaFichaNoPaciente(fichaId, pacienteId) {
+    return numerarPorCriacao(fichasClinicas_doPaciente(pacienteId)).get(fichaId) || null;
+  }
+
   /* ── Modal genérico de aviso (bloqueio) ── */
   function abrirModalAviso(titulo, msg) {
     const overlay = document.createElement('div');
@@ -9924,6 +9950,7 @@ function pode(acao) {
     const paciente = paciente_get(ficha.pacienteId);
     const modelo = fichaModelo_get(ficha.modeloId);
     const instituicao = instituicao_get();
+    const numero = numeroDaFichaNoPaciente(ficha.id, ficha.pacienteId);
 
     return `
       <div class="report-sheet">
@@ -9933,13 +9960,13 @@ function pode(acao) {
             : `<div class="inst-nome">${escapeHtml(instituicao.nome || '')}</div>`
           }
           <div class="inst-curso">${escapeHtml(instituicao.curso || 'Curso de Fisioterapia')}</div>
-          <div class="ficha-titulo">${escapeHtml(modelo ? modelo.titulo : 'Ficha clínica')}</div>
+          <div class="ficha-titulo">${escapeHtml(modelo ? modelo.titulo : 'Ficha clínica')}${numero ? ` — Ficha #${numero}` : ''}</div>
         </div>
 
         <div class="report-meta-grid">
           <div class="meta-item"><span class="meta-label">Aluno(a)</span><span class="meta-value">${escapeHtml(aluno ? aluno.nome : 'Aluno(a) removido(a)')}</span></div>
           <div class="meta-item"><span class="meta-label">Matrícula</span><span class="meta-value">${escapeHtml(aluno ? aluno.matricula : '—')}</span></div>
-          <div class="meta-item"><span class="meta-label">Paciente</span><span class="meta-value">${escapeHtml(paciente ? paciente.nome : '—')}</span></div>
+          <div class="meta-item"><span class="meta-label">Paciente</span><span class="meta-value">${escapeHtml(paciente ? paciente.nome : '—')}${numero ? ' (Ficha #' + numero + ')' : ''}</span></div>
           <div class="meta-item"><span class="meta-label">Idade / Sexo</span><span class="meta-value">${paciente && paciente.idade ? escapeHtml(paciente.idade) : '—'} / ${paciente && paciente.sexo ? escapeHtml(paciente.sexo) : '—'}</span></div>
           <div class="meta-item"><span class="meta-label">Ficha criada em</span><span class="meta-value">${fmtDataHora(ficha.criadoEm)}</span></div>
           <div class="meta-item"><span class="meta-label">Ficha integrada em</span><span class="meta-value">${fmtDataHora(ficha.integradoEm)}</span></div>
@@ -10055,6 +10082,9 @@ function pode(acao) {
         <div style="font-weight:700;font-size:14px;">${escapeHtml(p.nome)}</div>
         <div style="font-size:12.5px;color:var(--ac-charcoal-soft);margin-top:3px;">
           ${infoPacienteLinha(p) || 'Sem idade/sexo informados'}
+        </div>
+        <div style="font-size:11px;color:var(--ac-charcoal-soft);margin-top:8px;">
+          Última atualização: ${fmtData(paciente_ultimaAtividade(p.id))}
         </div>
         <div style="display:flex;gap:8px;margin-top:12px;">
           <button class="btn btn-ghost btn-sm paciente-editar" data-id="${p.id}"><i class="ti ti-edit"></i> Editar</button>
@@ -10175,6 +10205,7 @@ function pode(acao) {
         </div>
         <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:10px;">
           ${fichas.length} ficha${fichas.length === 1 ? '' : 's'} · ${integradas} integrada${integradas === 1 ? '' : 's'}
+          <br>Última atualização: ${fmtData(paciente_ultimaAtividade(p.id))}
         </div>
       </div>
     `;
@@ -10252,19 +10283,21 @@ function pode(acao) {
     document.body.appendChild(overlay);
   }
 
-  function htmlCardFicha(f) {
+  function htmlCardFicha(f, numero) {
     const modelo = fichaModelo_get(f.modeloId);
     const integrada = f.status === 'integrada';
     return `
       <div class="card card-pad ficha-clin-card" data-id="${f.id}" style="cursor:pointer;">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem;">
-          <div style="font-weight:700;font-size:13.5px;">${escapeHtml(modelo ? modelo.titulo : 'Modelo removido')}</div>
+          <div style="font-weight:700;font-size:13.5px;">
+            ${numero ? `<span style="color:#2563EB;">#${numero}</span> ` : ''}${escapeHtml(modelo ? modelo.titulo : 'Modelo removido')}
+          </div>
           <span class="badge ${integrada ? 'badge-success' : 'badge-neutral'}" style="font-size:10.5px;flex-shrink:0;white-space:nowrap;">
             <i class="ti ${integrada ? 'ti-lock' : 'ti-pencil'}"></i> ${integrada ? 'Integrada' : 'Rascunho'}
           </span>
         </div>
         <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:10px;">
-          Criada em ${fmtData(f.criadoEm)} · Atualizada em ${fmtData(f.atualizadoEm)}
+          Criada em ${fmtData(f.criadoEm)} · Última atualização: ${fmtData(f.atualizadoEm)}
           ${integrada ? '<br>Integrada em ' + fmtDataHora(f.integradoEm) : ''}
         </div>
         ${integrada ? '' : `
@@ -10282,6 +10315,7 @@ function pode(acao) {
     const sess = session_get();
     const fichas = fichasClinicas_doPaciente(paciente.id);
     const modelosDisp = modelos_disponiveisParaAluno(sess.alunoId);
+    const materiasDoAluno = materias_list().filter(m => (m.alunos || []).includes(sess.alunoId));
 
     content.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap;">
@@ -10291,10 +10325,14 @@ function pode(acao) {
           <div style="font-weight:700;font-size:15px;"><i class="ti ti-folder" style="color:#2563EB;"></i> ${escapeHtml(paciente.nome)}</div>
           <div style="font-size:11.5px;color:var(--ac-charcoal-soft);">${infoPacienteLinha(paciente)}</div>
         </div>
-        <button class="btn btn-accent btn-sm" id="btnNovaFichaPasta" ${modelosDisp.length === 0 ? 'disabled title="Nenhum modelo de ficha disponível para suas matérias"' : ''}><i class="ti ti-plus"></i> Nova ficha</button>
+        <button class="btn btn-accent btn-sm" id="btnNovaFichaPasta" ${materiasDoAluno.length === 0 ? 'disabled title="Você ainda não está inscrito(a) em nenhuma matéria"' : ''}><i class="ti ti-plus"></i> Nova ficha</button>
       </div>
 
-      ${modelosDisp.length === 0 ? `
+      ${materiasDoAluno.length === 0 ? `
+        <div class="card card-pad" style="background:var(--ac-warning-bg);border-color:var(--ac-warning);margin-bottom:1rem;">
+          <span style="font-size:12.5px;color:#78350F;">Você ainda não está inscrito(a) em nenhuma matéria.</span>
+        </div>
+      ` : modelosDisp.length === 0 ? `
         <div class="card card-pad" style="background:var(--ac-warning-bg);border-color:var(--ac-warning);margin-bottom:1rem;">
           <span style="font-size:12.5px;color:#78350F;">Nenhum modelo de ficha está disponível para as matérias em que você está inscrito(a) ainda. Peça ao professor para vincular uma ficha à sua matéria.</span>
         </div>
@@ -10307,7 +10345,10 @@ function pode(acao) {
         </div>
       ` : `
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;">
-          ${fichas.map(htmlCardFicha).join('')}
+          ${(() => {
+            const numeros = numerarPorCriacao(fichas);
+            return fichas.map(f => htmlCardFicha(f, numeros.get(f.id))).join('');
+          })()}
         </div>
       `}
     `;
@@ -10315,13 +10356,9 @@ function pode(acao) {
     $('#btnVoltarLancamento', content).addEventListener('click', () => paintLancamentoLista(content));
 
     const btnNova = $('#btnNovaFichaPasta', content);
-    if (btnNova && modelosDisp.length) {
+    if (btnNova && materiasDoAluno.length) {
       btnNova.addEventListener('click', () => {
-        if (modelosDisp.length === 1) {
-          criarFichaEAbrir(content, sess.alunoId, paciente.id, modelosDisp[0].id);
-        } else {
-          abrirModalEscolherModelo(modelosDisp, (modeloId) => criarFichaEAbrir(content, sess.alunoId, paciente.id, modeloId));
-        }
+        abrirModalEscolherMateriaModelo(sess, materiasDoAluno, (modeloId) => criarFichaEAbrir(content, sess.alunoId, paciente.id, modeloId));
       });
     }
 
@@ -10352,21 +10389,26 @@ function pode(acao) {
     }
   }
 
-  function abrirModalEscolherModelo(modelos, onEscolher) {
+  function abrirModalEscolherMateriaModelo(sess, materiasDoAluno, onEscolher) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
-      <div class="modal-box" style="max-width:420px;">
+      <div class="modal-box" style="max-width:440px;">
         <div class="modal-head">
           <h3>Nova ficha</h3>
           <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
         </div>
         <div class="modal-body">
-          <div class="field" style="margin-bottom:0;">
-            <label>Selecione o modelo de ficha</label>
-            <select id="selModeloFicha">
-              ${modelos.map(m => `<option value="${m.id}">${escapeHtml(m.titulo)}</option>`).join('')}
+          <div class="field">
+            <label>Matéria</label>
+            <select id="selMateriaFicha">
+              ${materiasDoAluno.map(m => `<option value="${m.id}">${escapeHtml(m.nome)}</option>`).join('')}
             </select>
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>Modelo de ficha</label>
+            <select id="selModeloFicha"></select>
+            <div class="field-hint" id="avisoSemModeloFicha" style="display:none;color:var(--ac-danger);">Nenhuma ficha disponível para esta matéria ainda.</div>
           </div>
         </div>
         <div class="modal-foot">
@@ -10375,11 +10417,36 @@ function pode(acao) {
         </div>
       </div>
     `;
+
+    const selMateria = overlay.querySelector('#selMateriaFicha');
+    const selModelo = overlay.querySelector('#selModeloFicha');
+    const aviso = overlay.querySelector('#avisoSemModeloFicha');
+    const btnConfirm = overlay.querySelector('[data-act="confirm"]');
+
+    function atualizarModelosDaMateria() {
+      const materiaId = selMateria.value;
+      const modelos = (db_load().fichaModelos || []).filter(m => (m.materiasIds || []).includes(materiaId));
+      if (!modelos.length) {
+        selModelo.innerHTML = '';
+        selModelo.disabled = true;
+        aviso.style.display = '';
+        btnConfirm.disabled = true;
+      } else {
+        selModelo.disabled = false;
+        aviso.style.display = 'none';
+        btnConfirm.disabled = false;
+        selModelo.innerHTML = modelos.map(m => `<option value="${m.id}">${escapeHtml(m.titulo)}</option>`).join('');
+      }
+    }
+    selMateria.addEventListener('change', atualizarModelosDaMateria);
+    atualizarModelosDaMateria();
+
     function close() { overlay.remove(); }
     overlay.querySelector('.modal-close').addEventListener('click', close);
     overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
     overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
-      const modeloId = overlay.querySelector('#selModeloFicha').value;
+      const modeloId = selModelo.value;
+      if (!modeloId) return;
       close();
       onEscolher(modeloId);
     });
@@ -10396,13 +10463,14 @@ function pode(acao) {
     }
     const modelo = fichaModelo_get(ficha.modeloId);
     const paciente = paciente_get(ficha.pacienteId);
+    const numero = numeroDaFichaNoPaciente(ficha.id, ficha.pacienteId);
 
     content.innerHTML = `
       <div class="report-toolbar no-print">
         <div style="display:flex;align-items:center;gap:10px;">
           <button class="btn btn-ghost btn-sm" id="btnVoltarPasta"><i class="ti ti-arrow-left"></i> Voltar</button>
           <span style="color:var(--ac-line-strong);">/</span>
-          <span style="font-size:13.5px;color:var(--ac-charcoal-soft);">${escapeHtml(paciente ? paciente.nome : 'Paciente')}</span>
+          <span style="font-size:13.5px;color:var(--ac-charcoal-soft);">${escapeHtml(paciente ? paciente.nome : 'Paciente')}${numero ? ` — Ficha #${numero}` : ''}</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn btn-ghost" id="btnSalvarFichaClin"><i class="ti ti-device-floppy"></i> Salvar</button>
@@ -10552,15 +10620,46 @@ function pode(acao) {
     paintListaEquipe(container);
   }
 
-  function htmlCardFichaEquipe(f) {
-    const aluno = alunos_get(f.alunoId);
+  /* Matéria(s) "responsáveis" por uma ficha — a(s) que vincula(m) o
+     modelo usado E em que o aluno que lançou está inscrito. Na
+     prática quase sempre é uma matéria só; se o modelo estiver
+     vinculado a mais de uma matéria do aluno, a ficha aparece em
+     cada uma (evita esconder informação). */
+  function materiasDaFichaEquipe(f) {
+    const modelo = fichaModelo_get(f.modeloId);
+    if (!modelo) return [];
+    return (modelo.materiasIds || []).filter(mid => {
+      const m = materia_get(mid);
+      return m && (m.alunos || []).includes(f.alunoId);
+    });
+  }
+
+  /* Agrupa as fichas visíveis em: matéria -> aluno -> fichas[] */
+  function agruparFichasEquipe(fichas) {
+    const SEM_MATERIA = '__sem_materia__';
+    const porMateria = {};
+    fichas.forEach(f => {
+      const ids = materiasDaFichaEquipe(f);
+      (ids.length ? ids : [SEM_MATERIA]).forEach(mid => {
+        if (!porMateria[mid]) porMateria[mid] = { materiaId: mid, fichas: [], porAluno: {} };
+        porMateria[mid].fichas.push(f);
+        if (!porMateria[mid].porAluno[f.alunoId]) porMateria[mid].porAluno[f.alunoId] = [];
+        porMateria[mid].porAluno[f.alunoId].push(f);
+      });
+    });
+    return porMateria;
+  }
+
+  function htmlCardFichaEquipe(f, numero) {
     const paciente = paciente_get(f.pacienteId);
     const modelo = fichaModelo_get(f.modeloId);
     return `
       <div class="card card-pad ficha-clin-card" data-id="${f.id}" style="cursor:pointer;">
-        <div style="font-weight:700;font-size:14px;">${escapeHtml(aluno ? aluno.nome : 'Aluno(a) removido(a)')}</div>
+        <div style="font-weight:700;font-size:13.5px;">
+          ${numero ? `<span style="color:#2563EB;">#${numero}</span> ` : ''}${escapeHtml(modelo ? modelo.titulo : 'Modelo removido')}
+        </div>
         <div style="font-size:12px;color:var(--ac-charcoal-soft);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-          ${escapeHtml(paciente ? paciente.nome : '(paciente removido)')} · ${escapeHtml(modelo ? modelo.titulo : 'Modelo removido')}
+          Paciente: ${escapeHtml(paciente ? paciente.nome : '(removido)')}
         </div>
         <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:10px;">
           Criada em ${fmtDataHora(f.criadoEm)}<br>Integrada em ${fmtDataHora(f.integradoEm)}
@@ -10571,28 +10670,130 @@ function pode(acao) {
 
   function paintListaEquipe(container) {
     const fichas = fichasClinicas_integradasVisiveis();
+    const grupos = agruparFichasEquipe(fichas);
+    const materiaIds = Object.keys(grupos);
 
     container.innerHTML = `
       <div style="margin-bottom:1.25rem;">
-        <h2 style="margin-bottom:2px;">Fichas integradas pelos alunos</h2>
-        <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Somente fichas já integradas (versão final, travada) aparecem aqui, com o registro de quando foram criadas e integradas.</p>
+        <h2 style="margin-bottom:2px;">Fichas</h2>
+        <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">Uma pasta para cada matéria com fichas integradas — abra para ver os alunos que já lançaram.</p>
       </div>
 
-      ${fichas.length === 0 ? `
+      ${materiaIds.length === 0 ? `
         <div class="card card-pad" style="text-align:center;padding:3rem 1rem;">
           <i class="ti ti-file-off" style="font-size:2.5rem;color:var(--ac-charcoal-soft);display:block;margin-bottom:1rem;opacity:.45;"></i>
           <p style="color:var(--ac-charcoal-soft);margin:0;">Nenhuma ficha integrada ainda.</p>
         </div>
       ` : `
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;">
-          ${fichas.map(htmlCardFichaEquipe).join('')}
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;">
+          ${materiaIds.map(mid => htmlCardMateriaEquipe(grupos[mid])).join('')}
         </div>
       `}
     `;
 
+    $all('.materia-equipe-card', container).forEach(card => {
+      card.addEventListener('click', () => paintAlunosDaMateriaEquipe(container, card.dataset.id));
+    });
+  }
+
+  function htmlCardMateriaEquipe(grupo) {
+    const materia = grupo.materiaId === '__sem_materia__' ? null : materia_get(grupo.materiaId);
+    const nome = materia ? materia.nome : 'Sem matéria vinculada';
+    const totalAlunos = Object.keys(grupo.porAluno).length;
+    return `
+      <div class="card card-pad materia-equipe-card" data-id="${grupo.materiaId}" style="cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:.6rem;">
+          <i class="ti ti-folder" style="font-size:22px;color:#2563EB;"></i>
+          <div style="font-weight:700;font-size:14px;min-width:0;">${escapeHtml(nome)}</div>
+        </div>
+        <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:10px;">
+          ${totalAlunos} aluno${totalAlunos === 1 ? '' : 's'} · ${grupo.fichas.length} ficha${grupo.fichas.length === 1 ? '' : 's'}
+        </div>
+      </div>
+    `;
+  }
+
+  function paintAlunosDaMateriaEquipe(container, materiaId) {
+    const fichas = fichasClinicas_integradasVisiveis();
+    const grupos = agruparFichasEquipe(fichas);
+    const grupo = grupos[materiaId];
+    if (!grupo) { paintListaEquipe(container); return; }
+    const materia = materiaId === '__sem_materia__' ? null : materia_get(materiaId);
+    const alunoIds = Object.keys(grupo.porAluno);
+
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" id="btnVoltarMaterias"><i class="ti ti-arrow-left"></i> Voltar</button>
+        <span style="color:var(--ac-line-strong);">/</span>
+        <div style="font-weight:700;font-size:15px;"><i class="ti ti-folder" style="color:#2563EB;"></i> ${escapeHtml(materia ? materia.nome : 'Sem matéria vinculada')}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;">
+        ${alunoIds.map(aid => htmlCardAlunoEquipe(aid, grupo.porAluno[aid])).join('')}
+      </div>
+    `;
+
+    $('#btnVoltarMaterias', container).addEventListener('click', () => paintListaEquipe(container));
+    $all('.aluno-equipe-card', container).forEach(card => {
+      card.addEventListener('click', () => paintFichasDoAlunoEquipe(container, materiaId, card.dataset.id));
+    });
+  }
+
+  function htmlCardAlunoEquipe(alunoId, fichasDoAluno) {
+    const aluno = alunos_get(alunoId);
+    return `
+      <div class="card card-pad aluno-equipe-card" data-id="${alunoId}" style="cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:.6rem;">
+          <i class="ti ti-folder" style="font-size:22px;color:#2563EB;"></i>
+          <div style="font-weight:700;font-size:14px;min-width:0;">${escapeHtml(aluno ? aluno.nome : 'Aluno(a) removido(a)')}</div>
+        </div>
+        <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:10px;">
+          ${fichasDoAluno.length} ficha${fichasDoAluno.length === 1 ? '' : 's'} integrada${fichasDoAluno.length === 1 ? '' : 's'}
+        </div>
+      </div>
+    `;
+  }
+
+  function paintFichasDoAlunoEquipe(container, materiaId, alunoId) {
+    const fichas = fichasClinicas_integradasVisiveis();
+    const grupos = agruparFichasEquipe(fichas);
+    const grupo = grupos[materiaId];
+    if (!grupo) { paintListaEquipe(container); return; }
+    const fichasDoAluno = grupo.porAluno[alunoId] || [];
+    const materia = materiaId === '__sem_materia__' ? null : materia_get(materiaId);
+    const aluno = alunos_get(alunoId);
+
+    container.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap;">
+        <button class="btn btn-ghost btn-sm" id="btnVoltarAlunos"><i class="ti ti-arrow-left"></i> Voltar</button>
+        <span style="color:var(--ac-line-strong);">/</span>
+        <span style="font-size:13px;color:var(--ac-charcoal-soft);">${escapeHtml(materia ? materia.nome : 'Sem matéria vinculada')}</span>
+        <span style="color:var(--ac-line-strong);">/</span>
+        <div style="font-weight:700;font-size:15px;">${escapeHtml(aluno ? aluno.nome : 'Aluno(a) removido(a)')}</div>
+      </div>
+      ${fichasDoAluno.length === 0 ? `
+        <div class="card card-pad" style="text-align:center;padding:3rem 1rem;">
+          <p style="color:var(--ac-charcoal-soft);margin:0;">Nenhuma ficha integrada ainda.</p>
+        </div>
+      ` : `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;">
+          ${(() => {
+            // numeração por paciente, já que o mesmo aluno pode ter vários pacientes
+            const numerosPorPaciente = {};
+            fichasDoAluno.forEach(f => {
+              if (!numerosPorPaciente[f.pacienteId]) {
+                numerosPorPaciente[f.pacienteId] = numerarPorCriacao(fichasClinicas_doPaciente(f.pacienteId));
+              }
+            });
+            return fichasDoAluno.map(f => htmlCardFichaEquipe(f, numerosPorPaciente[f.pacienteId].get(f.id))).join('');
+          })()}
+        </div>
+      `}
+    `;
+
+    $('#btnVoltarAlunos', container).addEventListener('click', () => paintAlunosDaMateriaEquipe(container, materiaId));
     $all('.ficha-clin-card', container).forEach(card => {
       card.addEventListener('click', () => {
-        paintVisualizacao(container, card.dataset.id, () => paintListaEquipe(container), 'Fichas — equipe');
+        paintVisualizacao(container, card.dataset.id, () => paintFichasDoAlunoEquipe(container, materiaId, alunoId), (aluno ? aluno.nome : 'Fichas'));
       });
     });
   }
