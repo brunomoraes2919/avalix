@@ -1443,6 +1443,10 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:12px;">
+        <div class="no-print" style="display:flex;align-items:center;gap:6px;">
+          <label for="semestreFiltroGlobal" style="font-size:11.5px;color:var(--ac-charcoal-soft);white-space:nowrap;">Semestre</label>
+          <select id="semestreFiltroGlobal" style="font-size:12.5px;padding:5px 8px;border-radius:8px;max-width:150px;"></select>
+        </div>
         <div class="notif-wrap no-print" id="notifWrap">
           <button class="btn-notif" id="btnNotif" aria-label="Notificações" aria-haspopup="true" aria-expanded="false">
             <i class="ti ti-bell"></i>
@@ -1693,6 +1697,9 @@ function buildSeed() {
   const matCardioTOId = uid('mat');
   const matNeuroOrtId = uid('mat');
 
+  /* ── Semestre letivo padrão do seed ── */
+  const semestreSeedId = uid('semestre');
+
   /* ── Alunos ── */
   const aJoaoId      = uid('aluno');
   const aMariaId     = uid('aluno');
@@ -1829,6 +1836,7 @@ function buildSeed() {
         {
           id: matCardioTOId,
           nome: 'Fisioterapia Cardiorrespiratória e T.O.',
+          semestreId: semestreSeedId,
           supervisores: [sabrinaId, iagoId],
           alunos: [aJoaoId, aMariaId, aLucasId, aRafaelId],
           cenarios: [
@@ -1839,6 +1847,7 @@ function buildSeed() {
         {
           id: matNeuroOrtId,
           nome: 'Neurologia e Ortopedia',
+          semestreId: semestreSeedId,
           supervisores: [camilaId],
           alunos: [aCarinaId, aFernandaId],
           cenarios: [
@@ -2002,6 +2011,9 @@ function buildSeed() {
       }
     ],
     fichasClinicas: [],
+    semestres: [
+      { id: semestreSeedId, label: '2026/2', status: 'ativo', criadoEm: ago(300), atualizadoEm: ago(300) }
+    ],
     fichaModelos: [
       {
         id: uid('modelo'),
@@ -2386,6 +2398,28 @@ function db_migrate(data) {
       });
     });
     data.version = 17; changed = true;
+  }
+
+  // v18 — semestres letivos (ex: "2026/1") e vínculo semestreId em
+  // cada matéria. Instalações anteriores a esta versão não tinham o
+  // conceito de semestre — cria um semestre padrão (inferido da data
+  // atual) e vincula todas as matérias existentes a ele, para não
+  // perder nada já cadastrado.
+  if (data.version < 18) {
+    if (!Array.isArray(data.semestres)) data.semestres = [];
+    const materiasSemSemestre = (data.config.materias || []).filter(m => !m.semestreId);
+    if (materiasSemSemestre.length || !data.semestres.length) {
+      let padrao = data.semestres.find(s => s.status === 'ativo') || data.semestres[0];
+      if (!padrao) {
+        const agoraData = new Date();
+        const rotulo = agoraData.getFullYear() + '/' + (agoraData.getMonth() < 6 ? '1' : '2');
+        const agoraIso = agoraData.toISOString();
+        padrao = { id: uid('semestre'), label: rotulo, status: 'ativo', criadoEm: agoraIso, atualizadoEm: agoraIso };
+        data.semestres.push(padrao);
+      }
+      materiasSemSemestre.forEach(m => { m.semestreId = padrao.id; });
+    }
+    data.version = 18; changed = true;
   }
   return changed;
 }
@@ -3127,7 +3161,101 @@ function avaliacoes_listByAluno(alunoId) {
 }
 
 /* ══ Matérias ═══════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════
+   Semestres letivos — cada matéria pertence a um semestre (ex:
+   "2026/1"). Um filtro global (topbar) define qual semestre está
+   "em visualização" no momento — escopando matérias, notas,
+   relatórios, painel e fichas em toda a plataforma, para os dois
+   papéis (professor e aluno). Guardado no navegador (não por login),
+   como um seletor de período — similar a um "ano fiscal" atual.
+   ══════════════════════════════════════════════════════════════ */
+
+const SEMESTRE_SELECIONADO_KEY = 'avaliaclin_semestre_selecionado';
+
+function semestres_list() {
+  const db = db_load();
+  return (db.semestres || []).slice().sort((a, b) => b.label.localeCompare(a.label));
+}
+function semestre_get(id) {
+  const db = db_load();
+  return (db.semestres || []).find(s => s.id === id) || null;
+}
+function semestre_create(label) {
+  const db = db_load();
+  if (!Array.isArray(db.semestres)) db.semestres = [];
+  const lbl = String(label || '').trim();
+  if (!lbl) return { ok: false, msg: 'Informe o semestre (ex: 2026/1).' };
+  if (!/^\d{4}\/[12]$/.test(lbl)) return { ok: false, msg: 'Use o formato AAAA/1 ou AAAA/2 (ex: 2026/1).' };
+  if (db.semestres.some(s => s.label === lbl)) return { ok: false, msg: 'Esse semestre já está cadastrado.' };
+  const agora = new Date().toISOString();
+  const semestre = { id: uid('semestre'), label: lbl, status: 'ativo', criadoEm: agora, atualizadoEm: agora };
+  db.semestres.push(semestre);
+  db_save(db);
+  logAction('Semestre cadastrado: ' + lbl);
+  return { ok: true, semestre };
+}
+function semestre_encerrar(id) {
+  const db = db_load();
+  const s = (db.semestres || []).find(x => x.id === id);
+  if (!s) return { ok: false, msg: 'Semestre não encontrado.' };
+  s.status = 'encerrado';
+  s.atualizadoEm = new Date().toISOString();
+  db_save(db);
+  logAction('Semestre encerrado: ' + s.label);
+  return { ok: true, semestre: s };
+}
+function semestre_reabrir(id) {
+  const db = db_load();
+  const s = (db.semestres || []).find(x => x.id === id);
+  if (!s) return { ok: false, msg: 'Semestre não encontrado.' };
+  s.status = 'ativo';
+  s.atualizadoEm = new Date().toISOString();
+  db_save(db);
+  logAction('Semestre reaberto: ' + s.label);
+  return { ok: true, semestre: s };
+}
+function semestre_temMaterias(id) {
+  return materias_list().some(m => m.semestreId === id);
+}
+function semestre_delete(id) {
+  const db = db_load();
+  const idx = (db.semestres || []).findIndex(s => s.id === id);
+  if (idx === -1) return { ok: false, msg: 'Semestre não encontrado.' };
+  if (semestre_temMaterias(id)) {
+    return { ok: false, msg: 'Não é possível excluir: já existem matérias vinculadas a este semestre.' };
+  }
+  db.semestres.splice(idx, 1);
+  db_save(db);
+  return { ok: true };
+}
+
+/* Semestre atualmente selecionado no filtro global (persistido no
+   navegador). Sem seleção salva, usa o semestre "ativo" mais recente
+   (ou, na ausência de um ativo, o mais recente entre todos). */
+function semestre_selecionadoId() {
+  try {
+    const salvo = localStorage.getItem(SEMESTRE_SELECIONADO_KEY);
+    if (salvo && semestre_get(salvo)) return salvo;
+  } catch (e) {}
+  const todos = semestres_list();
+  if (!todos.length) return null;
+  const ativos = todos.filter(s => s.status === 'ativo');
+  return (ativos[0] || todos[0]).id;
+}
+function semestre_selecionar(id) {
+  try { localStorage.setItem(SEMESTRE_SELECIONADO_KEY, id); } catch (e) {}
+}
+
 function materias_list() { return config_get().materias || []; }
+
+/* Matérias do semestre atualmente selecionado no filtro global —
+   usada em praticamente toda tela que lista/filtra matérias. */
+function materias_doSemestre(semestreId) {
+  return materias_list().filter(m => m.semestreId === semestreId);
+}
+function materias_doSemestreAtual() {
+  return materias_doSemestre(semestre_selecionadoId());
+}
 
 /* Matérias onde o professor está vinculado como supervisor — usado
    para restringir a quais matérias ele pode vincular um modelo de
@@ -3143,7 +3271,7 @@ function materia_get(id) {
 function materia_create(nome) {
   const db = db_load();
   if (!db.config.materias) db.config.materias = [];
-  const nova = { id: uid('mat'), nome: nome.trim(), cenarios: [], supervisores: [], alunos: [] };
+  const nova = { id: uid('mat'), nome: nome.trim(), semestreId: semestre_selecionadoId(), cenarios: [], supervisores: [], alunos: [] };
   db.config.materias.push(nova);
   db_save(db);
   logAction('Matéria criada: ' + nova.nome);
@@ -3156,6 +3284,7 @@ function materia_update(id, payload) {
   if (!m) return { ok: false, msg: 'Matéria não encontrada.' };
   const supAntes = Array.from(m.supervisores || []);
   if (payload.nome        !== undefined) m.nome        = String(payload.nome).trim();
+  if (payload.semestreId  !== undefined) m.semestreId  = payload.semestreId;
   if (payload.cenarios    !== undefined) m.cenarios    = payload.cenarios;
   if (payload.supervisores !== undefined) m.supervisores = payload.supervisores;
   if (payload.alunos       !== undefined) m.alunos       = payload.alunos;
@@ -3800,10 +3929,9 @@ function fichaModelos_doProfessor(userId, isAdmin) {
 /* Modelos disponíveis para um aluno lançar uma ficha nova — todo
    modelo vinculado a alguma matéria em que o aluno está inscrito. */
 function modelos_disponiveisParaAluno(alunoId) {
-  const cfg = config_get();
   const db = db_load();
   const materiasDoAluno = new Set(
-    (cfg.materias || []).filter(m => (m.alunos || []).includes(alunoId)).map(m => m.id)
+    materias_doSemestreAtual().filter(m => (m.alunos || []).includes(alunoId)).map(m => m.id)
   );
   return (db.fichaModelos || []).filter(modelo =>
     (modelo.materiasIds || []).some(mid => materiasDoAluno.has(mid))
@@ -5614,12 +5742,13 @@ function pode(acao) {
      ações (salvar matéria, editar cenário, etc.) re-renderizam a view
      inteira — sem isso, o usuário voltaria sempre para "Regras gerais". */
   const CONFIG_SUBTABS = [
+    { id: 'semestres',   label: 'Semestres',            icone: 'ti-calendar-event' },
     { id: 'gerais',      label: 'Regras gerais',        icone: 'ti-adjustments-horizontal' },
     { id: 'identidade',  label: 'Identidade visual',    icone: 'ti-photo' },
     { id: 'materias',    label: 'Matérias',             icone: 'ti-books' },
     { id: 'cenarios',    label: 'Cenários de estágio',  icone: 'ti-clipboard-list' }
   ];
-  let currentConfigSubtab = 'gerais';
+  let currentConfigSubtab = 'semestres';
 
   /* Mostra um aviso extra sempre que uma ação deixar (ou mantiver) um
      cenário em modo rascunho — a soma dos pesos dos blocos + prova
@@ -5654,6 +5783,10 @@ function pode(acao) {
     container.innerHTML = `
       <div class="config-subtabs" id="cfgSubtabs">${subtabsHtml}</div>
 
+      <div class="config-subpanel ${currentConfigSubtab === 'semestres' ? '' : 'hidden'}" data-panel="semestres">
+        <div id="cfgSemestresCard"></div>
+      </div>
+
       <div class="config-subpanel ${currentConfigSubtab === 'gerais' ? '' : 'hidden'}" data-panel="gerais">
         <div id="cfgGeraisCard"></div>
       </div>
@@ -5682,6 +5815,7 @@ function pode(acao) {
       </div>
     `;
 
+    renderSemestresCard(container);
     renderGeraisCard(container);
     renderIdentidadeCard(container);
     renderMateriasCard(container);
@@ -5728,8 +5862,10 @@ function pode(acao) {
     if (!card) return;
     const session_cfg = session_get();
     const isProfCfg = session_cfg && session_cfg.papel === 'professor';
-    /* Professores só veem as matérias onde estão vinculados */
-    const _todasMaterias = materias_list();
+    const semestreAtual = semestre_selecionadoId();
+    /* Professores só veem as matérias onde estão vinculados; todos só
+       veem as matérias do semestre selecionado no filtro global. */
+    const _todasMaterias = materias_doSemestreAtual();
     const materias = isProfCfg
       ? _todasMaterias.filter(m => {
           // Vinculado explicitamente como professor da matéria
@@ -5823,8 +5959,8 @@ function pode(acao) {
         ${materias.length === 0 ? `
           <div style="text-align:center;padding:2rem;color:var(--ac-charcoal-soft);border:2px dashed var(--ac-line);border-radius:var(--radius-md);">
             <i class="ti ti-school" style="font-size:2rem;display:block;margin-bottom:.5rem;opacity:.4;"></i>
-            ${isProfCfg ? 'Você ainda não foi vinculado(a) a nenhuma matéria.' : 'Nenhuma matéria cadastrada ainda.'}<br>
-            <span style="font-size:13px;">${isProfCfg ? 'Peça ao administrador para vincular seu perfil às matérias em que você leciona.' : 'Crie uma matéria e adicione os cenários e professores.'}</span>
+            ${isProfCfg ? 'Você ainda não foi vinculado(a) a nenhuma matéria neste semestre.' : 'Nenhuma matéria cadastrada neste semestre ainda.'}<br>
+            <span style="font-size:13px;">${isProfCfg ? 'Peça ao administrador para vincular seu perfil às matérias em que você leciona.' : 'Crie uma matéria (ela entra no semestre selecionado no filtro do topo) e adicione os cenários e professores.'}</span>
           </div>
         ` : materias.map(m => {
           const soma = materia_somaPesos(m);
@@ -5838,6 +5974,9 @@ function pode(acao) {
                 <i class="ti ti-school" style="color:#2563EB;font-size:18px;flex-shrink:0;"></i>
                 <span class="mat-nome-display" style="font-weight:700;font-size:1rem;">${escapeHtml(m.nome)}</span>
                 <input class="mat-nome-input hidden" type="text" value="${escapeHtml(m.nome)}" style="font-size:1rem;font-weight:700;flex:1;">
+                <select class="mat-semestre-select" data-mat-id="${m.id}" title="Semestre desta matéria" style="font-size:11px;padding:2px 6px;border-radius:6px;flex-shrink:0;">
+                  ${semestres_list().map(s => `<option value="${s.id}" ${s.id === m.semestreId ? 'selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
+                </select>
               </div>
               <div style="display:flex;align-items:center;gap:.5rem;flex-shrink:0;">
                 <span class="badge ${ok ? 'badge-success' : 'badge-warning'}" title="Soma dos pesos dos cenários">
@@ -6008,6 +6147,14 @@ function pode(acao) {
     });
 
     // Adicionar professor à matéria
+    card.querySelectorAll('.mat-semestre-select').forEach(sel => {
+      sel.addEventListener('change', function () {
+        const matId = this.dataset.matId;
+        materia_update(matId, { semestreId: this.value });
+        renderMateriasCard(outerContainer);
+      });
+    });
+
     card.querySelectorAll('.mat-sup-select').forEach(sel => {
       sel.addEventListener('change', function () {
         const uid = this.value;
@@ -6061,6 +6208,110 @@ function pode(acao) {
   }
 
     /* ---------- Card de regras gerais (escala, corte) ---------- */
+  /* ─────────── Card de Semestres letivos ─────────────────────────── */
+  function renderSemestresCard(container) {
+    const card = container.querySelector('#cfgSemestresCard');
+    if (!card) return;
+    const semestres = semestres_list();
+    const atualId = semestre_selecionadoId();
+
+    card.innerHTML = `
+      <div class="card card-pad">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:.75rem;margin-bottom:1.25rem;">
+          <div>
+            <h2 style="margin-bottom:3px;">Semestres letivos</h2>
+            <p style="color:var(--ac-charcoal-soft);font-size:13.5px;margin:0;">
+              Cada matéria pertence a um semestre (ex: 2026/1). O filtro no topo da tela define qual semestre está em visualização — tanto para professores quanto para alunos.
+            </p>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:1.25rem;padding-bottom:1.25rem;border-bottom:1px solid var(--ac-line);">
+          <div class="field" style="margin-bottom:0;flex:1;min-width:160px;">
+            <label>Novo semestre</label>
+            <input type="text" id="novoSemestreInput" placeholder="Ex: 2026/1">
+          </div>
+          <button class="btn btn-accent" id="btnAddSemestre" style="height:38px;"><i class="ti ti-plus"></i> Adicionar</button>
+        </div>
+
+        ${semestres.length === 0 ? `
+          <div style="text-align:center;padding:2rem;color:var(--ac-charcoal-soft);border:2px dashed var(--ac-line);border-radius:var(--radius-md);">
+            <i class="ti ti-calendar-off" style="font-size:2rem;display:block;margin-bottom:.5rem;opacity:.4;"></i>
+            Nenhum semestre cadastrado ainda.
+          </div>
+        ` : `
+          <table class="data-table" style="font-size:13.5px;">
+            <thead>
+              <tr>
+                <th>Semestre</th>
+                <th>Status</th>
+                <th>Matérias vinculadas</th>
+                <th style="text-align:right;">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${semestres.map(s => {
+                const totalMat = materias_doSemestre(s.id).length;
+                return `
+                <tr>
+                  <td style="font-weight:700;">
+                    ${escapeHtml(s.label)}
+                    ${s.id === atualId ? '<span class="badge badge-neutral" style="font-size:10px;margin-left:6px;">Selecionado no filtro</span>' : ''}
+                  </td>
+                  <td><span class="badge ${s.status === 'ativo' ? 'badge-success' : 'badge-neutral'}">${s.status === 'ativo' ? 'Ativo' : 'Encerrado'}</span></td>
+                  <td>${totalMat}</td>
+                  <td style="text-align:right;white-space:nowrap;">
+                    ${s.status === 'ativo'
+                      ? `<button class="btn btn-ghost btn-sm sem-btn-encerrar" data-id="${s.id}"><i class="ti ti-lock"></i> Encerrar</button>`
+                      : `<button class="btn btn-ghost btn-sm sem-btn-reabrir" data-id="${s.id}"><i class="ti ti-lock-open"></i> Reabrir</button>`
+                    }
+                    <button class="btn btn-ghost btn-sm sem-btn-excluir" data-id="${s.id}" style="color:var(--ac-danger);"><i class="ti ti-trash"></i></button>
+                  </td>
+                </tr>
+              `;
+              }).join('')}
+            </tbody>
+          </table>
+        `}
+      </div>
+    `;
+
+    $('#btnAddSemestre', card).addEventListener('click', () => {
+      const input = $('#novoSemestreInput', card);
+      const r = semestre_create(input.value);
+      if (r.ok) {
+        showToast('Semestre "' + r.semestre.label + '" cadastrado.', 'success');
+        renderSemestresCard(container);
+        if (window.refreshSemestreFiltro) refreshSemestreFiltro();
+      } else {
+        showToast(r.msg, 'danger');
+      }
+    });
+    $('#novoSemestreInput', card).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('#btnAddSemestre', card).click();
+    });
+
+    $all('.sem-btn-encerrar', card).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = semestre_encerrar(btn.dataset.id);
+        if (r.ok) { showToast('Semestre encerrado.', 'success'); renderSemestresCard(container); if (window.refreshSemestreFiltro) refreshSemestreFiltro(); }
+      });
+    });
+    $all('.sem-btn-reabrir', card).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = semestre_reabrir(btn.dataset.id);
+        if (r.ok) { showToast('Semestre reaberto.', 'success'); renderSemestresCard(container); if (window.refreshSemestreFiltro) refreshSemestreFiltro(); }
+      });
+    });
+    $all('.sem-btn-excluir', card).forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = semestre_delete(btn.dataset.id);
+        if (r.ok) { showToast('Semestre excluído.', 'success'); renderSemestresCard(container); if (window.refreshSemestreFiltro) refreshSemestreFiltro(); }
+        else showToast(r.msg, 'danger');
+      });
+    });
+  }
+
   function renderGeraisCard(container) {
     const cfg = config_get();
 
@@ -7113,6 +7364,15 @@ function pode(acao) {
       );
     }
 
+    /* Só fichas de cenários vinculados a uma matéria do semestre
+       selecionado no filtro global (cenários órfãos, sem matéria,
+       continuam sempre visíveis — não têm como ser escopados). */
+    const _materiasSemestreIds = new Set(materias_doSemestreAtual().map(m => m.id));
+    lista = lista.filter(a => {
+      const matInfo = cenario_materiaInfo(a.cenarioId);
+      return !matInfo || _materiasSemestreIds.has(matInfo.materia.id);
+    });
+
     if (listStatus !== 'todos') lista = lista.filter(a => a.status === listStatus);
     if (listSearch) {
       lista = lista.filter(a => {
@@ -7454,7 +7714,7 @@ function pode(acao) {
   function openNovaFichaModal(container) {
     const alunosAtivos = alunos_list().filter(a => a.ativo);
     const cenariosDisponiveis = cenarios_disponiveisParaFicha();
-    const materias = materias_list();
+    const materias = materias_doSemestreAtual();
     const session = session_get();
     const isProfessor = session && session.papel === 'professor';
     const semProfessores = professores_list().length === 0;
@@ -7463,7 +7723,7 @@ function pode(acao) {
       showToast('Cadastre um(a) aluno(a) antes de lançar uma ficha de avaliação.', 'danger'); return;
     }
     if (materias.length === 0) {
-      showToast('Nenhuma matéria cadastrada. Crie uma matéria em "Pesos e critérios" e vincule cenários a ela.', 'danger'); return;
+      showToast('Nenhuma matéria cadastrada no semestre selecionado. Troque o semestre no topo da tela ou crie uma matéria em "Pesos e critérios".', 'danger'); return;
     }
     if (cenariosDisponiveis.length === 0) {
       showToast('Nenhum cenário está pronto. Ajuste os pesos em "Pesos e critérios".', 'danger'); return;
@@ -8217,7 +8477,15 @@ function pode(acao) {
     const session = session_get();
     const alunos = alunos_list();
     const alunosAtivos = alunos.filter(a => a.ativo);
-    const avaliacoes = avaliacoes_list();
+    let avaliacoes = avaliacoes_list();
+    /* Só considera fichas de cenários vinculados a uma matéria do
+       semestre selecionado no filtro global (cenários órfãos, sem
+       matéria, continuam entrando nas estatísticas). */
+    const _matSemestreIdsDash = new Set(materias_doSemestreAtual().map(m => m.id));
+    avaliacoes = avaliacoes.filter(a => {
+      const matInfo = cenario_materiaInfo(a.cenarioId);
+      return !matInfo || _matSemestreIdsDash.has(matInfo.materia.id);
+    });
     const finalizadas = avaliacoes.filter(a => a.status === 'finalizada');
     const rascunhos = avaliacoes.filter(a => a.status === 'rascunho');
 
@@ -8581,6 +8849,14 @@ function pode(acao) {
       );
     }
 
+    /* Só fichas de cenários vinculados a uma matéria do semestre
+       selecionado (cenários órfãos, sem matéria, continuam visíveis). */
+    const _matSemestreIdsRel1 = new Set(materias_doSemestreAtual().map(m => m.id));
+    lista = lista.filter(a => {
+      const matInfo = cenario_materiaInfo(a.cenarioId);
+      return !matInfo || _matSemestreIdsRel1.has(matInfo.materia.id);
+    });
+
     if (listStatus !== 'todos') lista = lista.filter(a => a.status === listStatus);
     if (listCenario !== 'todos') lista = lista.filter(a => avaliacao_cenarioNome(a) === listCenario);
     if (listSupervisor !== 'todos') lista = lista.filter(a => {
@@ -8655,6 +8931,14 @@ function pode(acao) {
         (Array.isArray(a.supervisoresCompartilhadosIds) && a.supervisoresCompartilhadosIds.includes(_sessRel.id))
       );
     }
+
+    /* Só fichas de cenários vinculados a uma matéria do semestre
+       selecionado (cenários órfãos, sem matéria, continuam visíveis). */
+    const _matSemestreIdsRel2 = new Set(materias_doSemestreAtual().map(m => m.id));
+    lista = lista.filter(a => {
+      const matInfo = cenario_materiaInfo(a.cenarioId);
+      return !matInfo || _matSemestreIdsRel2.has(matInfo.materia.id);
+    });
 
     if (listStatus !== 'todos') lista = lista.filter(a => a.status === listStatus);
     if (listCenario !== 'todos') lista = lista.filter(a => avaliacao_cenarioNome(a) === listCenario);
@@ -9257,6 +9541,30 @@ function pode(acao) {
     const btn = $('#btnMobileMenu');
     if (btn) btn.setAttribute('aria-expanded', 'false');
   }
+  /* ---------- Filtro global de semestre (topbar) ---------- */
+  function refreshSemestreFiltro() {
+    const sel = $('#semestreFiltroGlobal');
+    if (!sel) return;
+    const semestres = semestres_list();
+    const atualId = semestre_selecionadoId();
+    sel.innerHTML = semestres.length
+      ? semestres.map(s => `<option value="${s.id}" ${s.id === atualId ? 'selected' : ''}>${s.label}${s.status === 'encerrado' ? ' (encerrado)' : ''}</option>`).join('')
+      : '<option value="">Nenhum semestre cadastrado</option>';
+  }
+  function initSemestreFiltro() {
+    const sel = $('#semestreFiltroGlobal');
+    if (!sel) return;
+    refreshSemestreFiltro();
+    sel.addEventListener('change', () => {
+      if (!sel.value) return;
+      semestre_selecionar(sel.value);
+      const activeBtn = document.querySelector('.nav-item.active');
+      const s = session_get();
+      navigateTo(activeBtn ? activeBtn.dataset.view : (s && s.papel === 'aluno' ? 'aluno' : 'dashboard'));
+    });
+  }
+  window.refreshSemestreFiltro = refreshSemestreFiltro;
+
   function initMobileMenu() {
     const btn = $('#btnMobileMenu');
     if (!btn) return;
@@ -9308,6 +9616,7 @@ function pode(acao) {
     initNav();
     initMobileMenu();
     initNotifPanel();
+    initSemestreFiltro();
 
     const existing = session_get();
     if (existing) enterApp();
@@ -9747,14 +10056,19 @@ function pode(acao) {
     });
     const cenIdsComAval = Object.keys(cenMap);
 
-    /* Matérias que têm ao menos 1 cenário com avaliação do aluno */
-    const todasMaterias = materias_list();
+    /* Matérias do semestre selecionado no filtro global que têm ao
+       menos 1 cenário com avaliação do aluno */
+    const todasMaterias = materias_doSemestreAtual();
     const materiasAtivas = todasMaterias.filter(m =>
       (m.cenarios || []).some(mc => cenIdsComAval.includes(mc.cenarioId))
     );
-    /* Cenários com avaliação que não pertencem a nenhuma matéria */
+    /* Cenários com avaliação que não pertencem a nenhuma matéria em
+       NENHUM semestre (órfãos de verdade — usa a lista completa aqui,
+       não a do semestre filtrado, senão um cenário de outro semestre
+       apareceria incorretamente como "órfão"). */
+    const _todasMateriasGlobal = materias_list();
     const cenOrfaos = cenIdsComAval.filter(cid =>
-      !todasMaterias.some(m => (m.cenarios||[]).some(mc => mc.cenarioId === cid))
+      !_todasMateriasGlobal.some(m => (m.cenarios||[]).some(mc => mc.cenarioId === cid))
     );
 
     /* métricas */
@@ -10315,7 +10629,7 @@ function pode(acao) {
     const sess = session_get();
     const fichas = fichasClinicas_doPaciente(paciente.id);
     const modelosDisp = modelos_disponiveisParaAluno(sess.alunoId);
-    const materiasDoAluno = materias_list().filter(m => (m.alunos || []).includes(sess.alunoId));
+    const materiasDoAluno = materias_doSemestreAtual().filter(m => (m.alunos || []).includes(sess.alunoId));
 
     content.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:1.25rem;flex-wrap:wrap;">
@@ -10325,12 +10639,12 @@ function pode(acao) {
           <div style="font-weight:700;font-size:15px;"><i class="ti ti-folder" style="color:#2563EB;"></i> ${escapeHtml(paciente.nome)}</div>
           <div style="font-size:11.5px;color:var(--ac-charcoal-soft);">${infoPacienteLinha(paciente)}</div>
         </div>
-        <button class="btn btn-accent btn-sm" id="btnNovaFichaPasta" ${materiasDoAluno.length === 0 ? 'disabled title="Você ainda não está inscrito(a) em nenhuma matéria"' : ''}><i class="ti ti-plus"></i> Nova ficha</button>
+        <button class="btn btn-accent btn-sm" id="btnNovaFichaPasta" ${materiasDoAluno.length === 0 ? 'disabled title="Você não está inscrito(a) em nenhuma matéria no semestre selecionado"' : ''}><i class="ti ti-plus"></i> Nova ficha</button>
       </div>
 
       ${materiasDoAluno.length === 0 ? `
         <div class="card card-pad" style="background:var(--ac-warning-bg);border-color:var(--ac-warning);margin-bottom:1rem;">
-          <span style="font-size:12.5px;color:#78350F;">Você ainda não está inscrito(a) em nenhuma matéria.</span>
+          <span style="font-size:12.5px;color:#78350F;">Você não está inscrito(a) em nenhuma matéria no semestre selecionado no filtro do topo.</span>
         </div>
       ` : modelosDisp.length === 0 ? `
         <div class="card card-pad" style="background:var(--ac-warning-bg);border-color:var(--ac-warning);margin-bottom:1rem;">
@@ -10634,13 +10948,20 @@ function pode(acao) {
     });
   }
 
-  /* Agrupa as fichas visíveis em: matéria -> aluno -> fichas[] */
+  /* Agrupa as fichas visíveis em: matéria -> aluno -> fichas[] — só
+     considera matérias do semestre selecionado no filtro global.
+     Uma ficha cuja(s) matéria(s) pertence(m) a outro semestre some
+     desta visão (mas nada é perdido — reaparece ao trocar o filtro). */
   function agruparFichasEquipe(fichas) {
     const SEM_MATERIA = '__sem_materia__';
+    const materiasSemestreIds = new Set(materias_doSemestreAtual().map(m => m.id));
     const porMateria = {};
     fichas.forEach(f => {
-      const ids = materiasDaFichaEquipe(f);
-      (ids.length ? ids : [SEM_MATERIA]).forEach(mid => {
+      const idsTodos = materiasDaFichaEquipe(f);
+      const idsDoSemestre = idsTodos.filter(mid => materiasSemestreIds.has(mid));
+      if (idsTodos.length && !idsDoSemestre.length) return; // só tem matéria(s) de outro semestre — não mostra aqui
+      const ids = idsDoSemestre.length ? idsDoSemestre : [SEM_MATERIA];
+      ids.forEach(mid => {
         if (!porMateria[mid]) porMateria[mid] = { materiaId: mid, fichas: [], porAluno: {} };
         porMateria[mid].fichas.push(f);
         if (!porMateria[mid].porAluno[f.alunoId]) porMateria[mid].porAluno[f.alunoId] = [];
@@ -11032,7 +11353,8 @@ function pode(acao) {
   function paintEditor(container) {
     const session = session_get();
     const isAdmin = session.papel === 'admin';
-    const materiasDisp = isAdmin ? materias_list() : materias_visiveisParaProfessor(session.id);
+    const materiasDisp = (isAdmin ? materias_list() : materias_visiveisParaProfessor(session.id))
+      .filter(m => m.semestreId === semestre_selecionadoId());
 
     container.innerHTML = `
       <div class="report-toolbar no-print">
