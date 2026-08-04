@@ -592,7 +592,28 @@ input::placeholder, textarea::placeholder { color: #B3ABA0; }
   font-size: 12.5px;
   font-weight: 700;
   flex-shrink: 0;
+  overflow: hidden;
 }
+.user-mini .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.avatar-wrap { position: relative; flex-shrink: 0; cursor: pointer; }
+.avatar-wrap:hover .avatar { filter: brightness(0.85); }
+.avatar-edit-btn {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--ac-terracotta);
+  border: 2px solid #0f2460;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+.avatar-edit-btn i { font-size: 8px; }
 .user-mini .u-name { font-size: 13px; font-weight: 600; color: #fff; line-height: 1.3; }
 .user-mini .u-role { font-size: 11px; color: rgba(255,255,255,0.55); }
 
@@ -1480,7 +1501,12 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
 
     <div class="sidebar-footer">
       <div class="user-mini">
-        <div class="avatar" id="userAvatarInitials">--</div>
+        <div class="avatar-wrap">
+          <div class="avatar" id="userAvatarInitials">--</div>
+          <button type="button" class="avatar-edit-btn" id="btnEditarFotoPerfil" title="Alterar foto de perfil" aria-label="Alterar foto de perfil">
+            <i class="ti ti-camera"></i>
+          </button>
+        </div>
         <div>
           <div class="u-name" id="userMiniName">—</div>
           <div class="u-role" id="userMiniRole">—</div>
@@ -2706,6 +2732,7 @@ function users_update(id, payload) {
   if (payload.email) user.email = payload.email.trim().toLowerCase();
   if (payload.papel) user.papel = payload.papel;
   if (payload.senha) user.senha = payload.senha;
+  if (payload.fotoDataUrl !== undefined) user.fotoDataUrl = payload.fotoDataUrl;
   db_save(db);
   logAction(`Usuário editado: ${user.nome}`);
 
@@ -2864,6 +2891,7 @@ function alunos_update(id, payload) {
   });
   if (payload.turmaId !== undefined) aluno.turmaId = payload.turmaId || null;
   if (payload.supervisorPadraoId !== undefined) aluno.supervisorPadraoId = payload.supervisorPadraoId || null;
+  if (payload.fotoDataUrl !== undefined) aluno.fotoDataUrl = payload.fotoDataUrl;
   db_save(db);
   logAction(`Aluno(a) editado(a): ${aluno.nome}`);
   return { ok: true, aluno };
@@ -9556,7 +9584,13 @@ function pode(acao) {
     const s = session_get();
     if (!s) return;
     const initials = s.nome.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-    $('#userAvatarInitials').textContent = initials;
+
+    const registro = s.papel === 'aluno' ? alunos_get(s.alunoId) : users_get(s.id);
+    const fotoUrl = registro ? registro.fotoDataUrl : null;
+    const avatarEl = $('#userAvatarInitials');
+    avatarEl.innerHTML = fotoUrl ? `<img src="${fotoUrl}" alt="">` : '';
+    if (!fotoUrl) avatarEl.textContent = initials;
+
     $('#userMiniName').textContent = s.nome;
     $('#userMiniRole').textContent = PAPEIS[s.papel] ? PAPEIS[s.papel].label : s.papel;
 
@@ -9565,6 +9599,94 @@ function pode(acao) {
     chip.className = 'role-chip role-' + s.papel;
 
     refreshNotifBadge();
+  }
+
+  /* ---------- Foto de perfil (aluno e equipe, self-service) ---------- */
+  function abrirModalFotoPerfil() {
+    const s = session_get();
+    if (!s) return;
+    const isAluno = s.papel === 'aluno';
+    const registro = isAluno ? alunos_get(s.alunoId) : users_get(s.id);
+    if (!registro) return;
+    let pendingFoto = registro.fotoDataUrl || null;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:400px;">
+        <div class="modal-head">
+          <h3>Foto de perfil</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body" style="text-align:center;">
+          <div id="foto-perfil-preview-wrap" style="width:140px;height:140px;border:2px dashed var(--ac-line);border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--ac-sand);overflow:hidden;margin:0 auto .9rem;">
+            ${pendingFoto
+              ? `<img id="foto-perfil-preview-img" src="${pendingFoto}" style="width:100%;height:100%;object-fit:cover;" alt="Foto de perfil">`
+              : `<i class="ti ti-user" style="font-size:44px;color:var(--ac-charcoal-soft);opacity:.5;"></i>`
+            }
+          </div>
+          <div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;">
+            <label class="btn btn-primary btn-sm" style="cursor:pointer;">
+              <i class="ti ti-upload"></i> ${pendingFoto ? 'Trocar foto' : 'Enviar foto'}
+              <input type="file" id="fotoPerfilFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">
+            </label>
+            <button class="btn btn-ghost btn-sm" id="btnRemoverFotoPerfil" ${!pendingFoto ? 'disabled' : ''}>
+              <i class="ti ti-trash"></i> Remover
+            </button>
+          </div>
+          <div class="field-hint" style="margin-top:.6rem;">Opcional. PNG, JPEG, WEBP ou GIF, até 2 MB.</div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-primary" data-act="confirm"><i class="ti ti-device-floppy"></i> Salvar</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    const fileInput = overlay.querySelector('#fotoPerfilFileInput');
+    fileInput.addEventListener('change', function () {
+      const file = this.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { showToast('A foto deve ter menos de 2 MB.', 'danger'); return; }
+      const reader = new FileReader();
+      reader.onload = function (ev) {
+        pendingFoto = ev.target.result;
+        overlay.querySelector('#foto-perfil-preview-wrap').innerHTML =
+          `<img id="foto-perfil-preview-img" src="${pendingFoto}" style="width:100%;height:100%;object-fit:cover;" alt="Foto de perfil">`;
+        overlay.querySelector('#btnRemoverFotoPerfil').disabled = false;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    overlay.querySelector('#btnRemoverFotoPerfil').addEventListener('click', function () {
+      pendingFoto = null;
+      overlay.querySelector('#foto-perfil-preview-wrap').innerHTML =
+        '<i class="ti ti-user" style="font-size:44px;color:var(--ac-charcoal-soft);opacity:.5;"></i>';
+      this.disabled = true;
+    });
+
+    overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
+      const res = isAluno
+        ? alunos_update(s.alunoId, { fotoDataUrl: pendingFoto })
+        : users_update(s.id, { fotoDataUrl: pendingFoto });
+      if (!res.ok) { showToast(res.msg || 'Erro ao salvar.', 'danger'); return; }
+      close();
+      showToast('Foto de perfil atualizada.', 'success');
+      paintUserChrome();
+    });
+
+    document.body.appendChild(overlay);
+  }
+
+  function initAvatarPerfil() {
+    const wrap = $('#userAvatarInitials');
+    const btn = $('#btnEditarFotoPerfil');
+    if (wrap && wrap.parentElement) wrap.parentElement.addEventListener('click', abrirModalFotoPerfil);
+    if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); abrirModalFotoPerfil(); });
   }
 
   function navigateTo(view, opts) {
@@ -9680,6 +9802,7 @@ function pode(acao) {
     initMobileMenu();
     initNotifPanel();
     initSemestreFiltro();
+    initAvatarPerfil();
 
     const existing = session_get();
     if (existing) enterApp();
