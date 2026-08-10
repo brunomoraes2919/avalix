@@ -2119,6 +2119,15 @@ function buildSeed() {
             tipo: c.tipo === 'date' ? 'data' : 'texto'
           }))
         }))
+      },
+      {
+        id: uid('modelo'),
+        titulo: 'Ficha de Avaliação Fisioterapêutica — UTI Neonatal',
+        materiasIds: [],
+        criadoPorId: null,
+        criadoEm: ago(5),
+        atualizadoEm: ago(5),
+        topicos: FICHA_NEONATAL_TOPICOS_SEED()
       }
     ],
     pacientes: [],
@@ -2508,7 +2517,139 @@ function db_migrate(data) {
     }
     data.version = 18; changed = true;
   }
+
+  // v19 — adiciona o modelo de ficha "UTI Neonatal" (pronto pra usar,
+  // sem matéria vinculada ainda — o professor/admin escolhe a quais
+  // matérias vincular em "Cadastrar ficha"). Só insere se ainda não
+  // existir um modelo com este título, pra não duplicar.
+  if (data.version < 19) {
+    if (!Array.isArray(data.fichaModelos)) data.fichaModelos = [];
+    const jaExiste = data.fichaModelos.some(m => m.titulo === 'Ficha de Avaliação Fisioterapêutica — UTI Neonatal');
+    if (!jaExiste) {
+      const agoraIso = new Date().toISOString();
+      data.fichaModelos.push({
+        id: uid('modelo'),
+        titulo: 'Ficha de Avaliação Fisioterapêutica — UTI Neonatal',
+        materiasIds: [],
+        criadoPorId: null,
+        criadoEm: agoraIso,
+        atualizadoEm: agoraIso,
+        topicos: FICHA_NEONATAL_TOPICOS_SEED()
+      });
+    }
+    data.version = 19; changed = true;
+  }
   return changed;
+}
+
+/* Estrutura de tópicos/subtópicos do modelo "UTI Neonatal" — função
+   (não const) porque é referenciada tanto na migração quanto no seed,
+   e cada uma precisa da sua própria cópia (ids independentes). */
+function FICHA_NEONATAL_TOPICOS_SEED() {
+  return [
+    {
+      id: uid('topico'), titulo: 'A · Identificação',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'Nome do paciente', tipo: 'texto', obrigatorio: true },
+        { id: uid('subtopico'), titulo: 'Registro', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Leito', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Data / hora', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'DN (data de nascimento)', tipo: 'data', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'IG nasc. (idade gestacional ao nascer)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'IG corr. (idade gestacional corrigida)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Idade (dias)', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Peso ao nascer', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Peso atual', tipo: 'numero', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'B · Diagnóstico e história clínica',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'Diagnóstico principal', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Comorbidades', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Dias de internação', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Motivo da internação', tipo: 'texto', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'C · Suporte respiratório',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'Suporte respiratório (ar ambiente / O₂ inalatório / CPAP / VNI / VM invasiva)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'FiO₂', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'PEEP/CPAP', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Modo', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'FR programada', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'SatO₂ alvo', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'TOT/cânula nº', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Fixação (cm)', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Dias de intubação', tipo: 'numero', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'D · Sinais vitais',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'FC', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'FR', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'SatO₂', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Temperatura', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'PA (se disponível)', tipo: 'texto', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'E · Avaliação respiratória',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'Padrão respiratório (regular / irregular / tiragem / bat. de asa nasal / gemência / apneia)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'MV — murmúrio vesicular (presente / diminuído)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Ruídos adventícios', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Localização', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Secreção (ausente / presente)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Aspecto da secreção', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Quantidade da secreção', tipo: 'texto', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'F · Estado neurocomportamental e dor',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'Estado (sono / ativo / irritado)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Tônus (normal / hipotônico / hipertônico)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Dor (escala NIPS/PIPP)', tipo: 'numero', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'G · Gasometria e exames recentes',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'pH', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'PaCO₂', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'PaO₂', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'HCO₃⁻', tipo: 'numero', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Lactato', tipo: 'numero', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'H · Dispositivos e pele',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'Acessos (cateteres/PICC)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Pele (íntegra / lesão)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Posicionamento atual', tipo: 'texto', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'I · Conduta realizada',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'Condutas realizadas (aspiração de VA, posicionamento terapêutico, estimulação sensório-motora, manobras de higiene brônquica, mobilização, outra)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Resposta à intervenção (tolerou bem / instabilizou)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Observações', tipo: 'texto', obrigatorio: false }
+      ]
+    },
+    {
+      id: uid('topico'), titulo: 'J · Evolução e responsável',
+      subtopicos: [
+        { id: uid('subtopico'), titulo: 'Evolução / observações', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Fisioterapeuta responsável (COFFITO)', tipo: 'texto', obrigatorio: false },
+        { id: uid('subtopico'), titulo: 'Data / hora', tipo: 'texto', obrigatorio: false }
+      ]
+    }
+  ];
 }
 
 /* ---------- Acesso ao "banco" ---------- */
