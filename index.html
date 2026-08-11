@@ -897,7 +897,7 @@ a:focus-visible {
 .shared-supervisor-row select { flex: 1; }
 
 /* ============================================================
-   Abas de cenário (Pesos e critérios)
+   Abas de cenário (Configurações de parâmetros)
    ============================================================ */
 
 .cenario-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -934,7 +934,7 @@ a:focus-visible {
 .cenario-tab .cenario-tab-edit:hover { color: var(--ac-ink); }
 
 /* ============================================================
-   Sub-abas da tela "Pesos e critérios"
+   Sub-abas da tela "Configurações de parâmetros"
    ============================================================ */
 
 .config-subtabs {
@@ -1493,7 +1493,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
 
       <div class="nav-section-label" id="nav-section-admin">Administração</div>
       <button class="nav-item" data-view="turmas"><i class="ti ti-school"></i> Turmas</button>
-      <button class="nav-item" data-view="configuracoes"><i class="ti ti-adjustments"></i> Pesos e critérios</button>
+      <button class="nav-item" data-view="configuracoes"><i class="ti ti-adjustments"></i> Configurações de parâmetros</button>
       <button class="nav-item" data-view="usuarios"><i class="ti ti-user-cog"></i> Usuários</button>
     </nav>
 
@@ -3208,7 +3208,7 @@ function cenario_somaPesos(cenarioId) {
 /* Um cenário só está "pronto" quando a soma dos pesos dos blocos +
    prova teórica bate exatamente com a escala máxima da nota final.
    Enquanto isso não acontece, ele fica em modo rascunho: continua
-   existindo e editável em "Pesos e critérios", mas não pode ser
+   existindo e editável em "Configurações de parâmetros", mas não pode ser
    escolhido para criar uma ficha de avaliação vinculada a um aluno —
    evita lançar notas numa estrutura cuja nota final nunca vai bater
    certo com a escala configurada. */
@@ -3803,7 +3803,7 @@ function avaliacoes_create(payload) {
   const cenario = db.config.cenarios.find(c => c.id === payload.cenarioId);
   if (!cenario) return { ok: false, msg: 'Cenário inválido.' };
   if (!cenario_estaCompleto(payload.cenarioId)) {
-    return { ok: false, msg: `O cenário "${cenario.nome}" está como rascunho (a soma dos pesos não bate com a escala máxima) e não pode ser vinculado a um aluno ainda. Ajuste os pesos em "Pesos e critérios".` };
+    return { ok: false, msg: `O cenário "${cenario.nome}" está como rascunho (a soma dos pesos não bate com a escala máxima) e não pode ser vinculado a um aluno ainda. Ajuste os pesos em "Configurações de parâmetros".` };
   }
 
   if (!payload.supervisorPrincipalId) {
@@ -4602,7 +4602,7 @@ function fichaClinica_delete(id) {
 }
 
 /* Alunos visíveis a um professor — reaproveita o vínculo aluno<->matéria
-   já usado em "Pesos e critérios": todo aluno de uma matéria onde o
+   já usado em "Configurações de parâmetros": todo aluno de uma matéria onde o
    professor está em supervisores[]. */
 function professor_alunosVisiveis(userId) {
   const cfg = config_get();
@@ -6114,7 +6114,7 @@ function pode(acao) {
 
   let currentCenarioId = null;
 
-  /* Lembra qual sub-aba de "Pesos e critérios" está ativa, já que várias
+  /* Lembra qual sub-aba de "Configurações de parâmetros" está ativa, já que várias
      ações (salvar matéria, editar cenário, etc.) re-renderizam a view
      inteira — sem isso, o usuário voltaria sempre para "Regras gerais". */
   const CONFIG_SUBTABS = [
@@ -8151,10 +8151,10 @@ function pode(acao) {
       showToast('Cadastre um(a) aluno(a) antes de lançar uma ficha de avaliação.', 'danger'); return;
     }
     if (materias.length === 0) {
-      showToast('Nenhuma matéria cadastrada no semestre selecionado. Troque o semestre no topo da tela ou crie uma matéria em "Pesos e critérios".', 'danger'); return;
+      showToast('Nenhuma matéria cadastrada no semestre selecionado. Troque o semestre no topo da tela ou crie uma matéria em "Configurações de parâmetros".', 'danger'); return;
     }
     if (cenariosDisponiveis.length === 0) {
-      showToast('Nenhum cenário está pronto. Ajuste os pesos em "Pesos e critérios".', 'danger'); return;
+      showToast('Nenhum cenário está pronto. Ajuste os pesos em "Configurações de parâmetros".', 'danger'); return;
     }
     if (semProfessores) {
       showToast('Nenhum professor cadastrado. Cadastre em "Usuários" antes de lançar.', 'danger'); return;
@@ -8165,7 +8165,7 @@ function pode(acao) {
       (m.cenarios || []).some(mc => cenariosDisponiveis.find(c => c.id === mc.cenarioId))
     );
     if (materiasComCenario.length === 0) {
-      showToast('Nenhuma matéria possui cenários prontos. Ajuste os pesos em "Pesos e critérios".', 'danger'); return;
+      showToast('Nenhuma matéria possui cenários prontos. Ajuste os pesos em "Configurações de parâmetros".', 'danger'); return;
     }
 
     const overlay = document.createElement('div');
@@ -9110,7 +9110,7 @@ function pode(acao) {
         <i class="ti ${todasConsistentes ? 'ti-circle-check' : 'ti-alert-triangle'}" style="font-size:14px;margin-top:1px;"></i>
         ${todasConsistentes
           ? 'Pesos consistentes com a escala máxima em todos os cenários.'
-          : `Pesos inconsistentes em: ${escapeHtml(inconsistentes.map(c => c.nome).join(', '))} — revise em "Pesos e critérios".`}
+          : `Pesos inconsistentes em: ${escapeHtml(inconsistentes.map(c => c.nome).join(', '))} — revise em "Configurações de parâmetros".`}
       </div>
     `;
   }
@@ -9769,7 +9769,7 @@ function pode(acao) {
     avaliacoes:     { title: 'Lançar notas',          sub: 'Avaliação por critério, bloco e quinzena' },
     relatorios:     { title: 'Relatórios em PDF',     sub: 'Ficha de avaliação formatada para assinatura' },
     turmas:         { title: 'Turmas',                sub: 'Catálogo de turmas/períodos para o cadastro de alunos' },
-    configuracoes:  { title: 'Pesos e critérios',     sub: 'Cenários, blocos, pesos e nota de corte' },
+    configuracoes:  { title: 'Configurações de parâmetros',     sub: 'Cenários, blocos, pesos e nota de corte' },
     usuarios:       { title: 'Usuários',              sub: 'Administradores, professores e visualizadores' },
     auditoria:      { title: 'Histórico',             sub: 'Registro de ações realizadas na plataforma' },
     aluno:          { title: 'Meu Desempenho',         sub: 'Suas fichas de avaliação e evolução nas práticas supervisionadas' },
@@ -11905,7 +11905,7 @@ function pode(acao) {
         <div class="field" style="margin-bottom:0;">
           <label>Vincular a matérias — o aluno só verá esta ficha se estiver numa delas</label>
           ${materiasDisp.length === 0 ? `
-            <div class="field-hint">Você ainda não supervisiona nenhuma matéria. Vincule-se a uma em "Pesos e critérios" → Matérias antes de publicar esta ficha.</div>
+            <div class="field-hint">Você ainda não supervisiona nenhuma matéria. Vincule-se a uma em "Configurações de parâmetros" → Matérias antes de publicar esta ficha.</div>
           ` : `
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
               ${materiasDisp.map(m => `
