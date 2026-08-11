@@ -1763,6 +1763,39 @@ function criarBlocosPadrao() {
   ];
 }
 
+/* Remove todos os dados de teste/demonstração, mantendo a estrutura
+   já configurada (turmas, matérias, cenários, semestres, identidade
+   visual, regras gerais e os modelos de ficha) — usada tanto no seed
+   de uma instalação nova quanto na migração de uma base já em uso,
+   pra garantir que as duas fiquem exatamente no mesmo estado "limpo"
+   de lançamento: só o login admin, com a senha definitiva. */
+function _limparDadosDeTeste(data) {
+  const adminMantido = (data.users || []).find(u => u.papel === 'admin') || (data.users || [])[0] || null;
+  data.users = adminMantido ? [Object.assign({}, adminMantido, { senha: 'Helois@111329', ativo: true })] : [];
+
+  data.alunos = [];
+  data.avaliacoes = [];
+  data.fichasClinicas = [];
+  data.pacientes = [];
+  data.notificacoes = [];
+  data.resetTokens = [];
+  data.auditLog = [];
+
+  /* Matérias, turmas, cenários e semestres continuam existindo — só
+     tira o vínculo com os alunos/professores de teste. */
+  ((data.config || {}).materias || []).forEach(m => {
+    m.alunos = [];
+    m.supervisores = [];
+  });
+
+  /* Modelos de ficha continuam cadastrados, mas sem matéria vinculada
+     — cabe ao professor final vincular. */
+  (data.fichaModelos || []).forEach(modelo => {
+    modelo.materiasIds = [];
+    modelo.criadoPorId = null;
+  });
+}
+
 /* ---------- Seed inicial ---------- */
 function buildSeed() {
   /* ── IDs fixos para garantir consistência ── */
@@ -1894,7 +1927,7 @@ function buildSeed() {
   const iso = (d) => new Date(d).toISOString();
   const ago = (h) => iso(Date.now() - h * 3600000);
 
-  return {
+  const db = {
     version: 13,
     users: [
       { id: adminId,   nome: 'Administrador do Sistema',             email: 'admin@avaliaclin.com',        senha: 'admin123',      papel: 'admin',        ativo: true, criadoEm: ago(720) },
@@ -2131,6 +2164,8 @@ function buildSeed() {
     pacientes: [],
     auditLog: []
   };
+  _limparDadosDeTeste(db);
+  return db;
 }
 
 /* ---------- Migração de schema ----------
@@ -2558,6 +2593,17 @@ function db_migrate(data) {
       a.usuario = candidato;
     });
     data.version = 20; changed = true;
+  }
+
+  // v21 — limpeza final para lançamento em produção: remove todos os
+  // dados de teste/demonstração (professores, alunos, avaliações,
+  // fichas clínicas, pacientes), mantendo a estrutura já configurada
+  // (turmas, matérias, cenários, semestres, identidade visual, regras
+  // gerais e os modelos de ficha, agora sem matéria vinculada). Fica
+  // só o login admin, com a senha definitiva. Roda uma única vez.
+  if (data.version < 21) {
+    _limparDadosDeTeste(data);
+    data.version = 21; changed = true;
   }
   return changed;
 }
