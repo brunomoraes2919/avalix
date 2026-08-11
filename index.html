@@ -11642,10 +11642,14 @@ function pode(acao) {
     });
   }
 
-  function htmlSubtopico(topicoId, s) {
+  function htmlSubtopico(topicoId, s, idx, total) {
     const tipo = s.tipo || 'texto';
     return `
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:.5rem;flex-wrap:wrap;">
+        <div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0;">
+          <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="move-subtopico-up" data-topico-id="${topicoId}" data-subtopico-id="${s.id}" title="Mover para cima" style="width:22px;height:18px;" ${idx === 0 ? 'disabled' : ''}><i class="ti ti-chevron-up" style="font-size:13px;"></i></button>
+          <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="move-subtopico-down" data-topico-id="${topicoId}" data-subtopico-id="${s.id}" title="Mover para baixo" style="width:22px;height:18px;" ${idx === total - 1 ? 'disabled' : ''}><i class="ti ti-chevron-down" style="font-size:13px;"></i></button>
+        </div>
         <input type="text" data-sub-titulo="${s.id}" placeholder="Nome do campo (ex: Nome do paciente)" value="${escapeHtml(s.titulo)}" style="flex:1;min-width:160px;">
         <select data-sub-tipo="${s.id}" style="width:auto;flex-shrink:0;" title="Tipo de caractere aceito neste campo">
           <option value="texto" ${tipo === 'texto' ? 'selected' : ''}>Texto</option>
@@ -11668,7 +11672,7 @@ function pode(acao) {
           <button type="button" class="btn btn-ghost btn-sm btn-icon" data-action="remove-topico" data-topico-id="${t.id}" title="Remover tópico"><i class="ti ti-trash"></i></button>
         </div>
         <div class="subtopicos-wrap" data-topico-subs="${t.id}">
-          ${t.subtopicos.map(s => htmlSubtopico(t.id, s)).join('')}
+          ${t.subtopicos.map((s, idx) => htmlSubtopico(t.id, s, idx, t.subtopicos.length)).join('')}
         </div>
         <button type="button" class="btn btn-ghost btn-sm" data-action="add-subtopico" data-topico-id="${t.id}"><i class="ti ti-plus"></i> Adicionar subtópico</button>
       </div>
@@ -11749,6 +11753,34 @@ function pode(acao) {
         syncDraftFromDom(container);
         const t = draftModelo.topicos.find(x => x.id === btn.dataset.topicoId);
         if (t) t.subtopicos = t.subtopicos.filter(s => s.id !== btn.dataset.subtopicoId);
+        paintEditor(container);
+      });
+    });
+
+    $all('[data-action="move-subtopico-up"]', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncDraftFromDom(container);
+        const t = draftModelo.topicos.find(x => x.id === btn.dataset.topicoId);
+        if (!t) return;
+        const idx = t.subtopicos.findIndex(s => s.id === btn.dataset.subtopicoId);
+        if (idx > 0) {
+          const [item] = t.subtopicos.splice(idx, 1);
+          t.subtopicos.splice(idx - 1, 0, item);
+        }
+        paintEditor(container);
+      });
+    });
+
+    $all('[data-action="move-subtopico-down"]', container).forEach(btn => {
+      btn.addEventListener('click', () => {
+        syncDraftFromDom(container);
+        const t = draftModelo.topicos.find(x => x.id === btn.dataset.topicoId);
+        if (!t) return;
+        const idx = t.subtopicos.findIndex(s => s.id === btn.dataset.subtopicoId);
+        if (idx > -1 && idx < t.subtopicos.length - 1) {
+          const [item] = t.subtopicos.splice(idx, 1);
+          t.subtopicos.splice(idx + 1, 0, item);
+        }
         paintEditor(container);
       });
     });
