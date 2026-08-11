@@ -1431,14 +1431,14 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
             <label for="reset-nova-senha">Nova senha</label>
             <div class="input-icon-wrap">
               <i class="ti ti-lock"></i>
-              <input type="password" id="reset-nova-senha" placeholder="Mínimo 6 caracteres">
+              <input type="password" id="reset-nova-senha" autocomplete="new-password" placeholder="Mínimo 6 caracteres">
             </div>
           </div>
           <div class="field">
             <label for="reset-confirma-senha">Confirme a nova senha</label>
             <div class="input-icon-wrap">
               <i class="ti ti-lock"></i>
-              <input type="password" id="reset-confirma-senha" placeholder="Repita a senha">
+              <input type="password" id="reset-confirma-senha" autocomplete="new-password" placeholder="Repita a senha">
             </div>
           </div>
 
@@ -4921,7 +4921,7 @@ function pode(acao) {
               <label for="u-senha">${editing ? 'Nova senha (deixe em branco para manter a atual)' : 'Senha de acesso'}</label>
               <div class="input-icon-wrap">
                 <i class="ti ti-lock"></i>
-                <input type="password" id="u-senha" placeholder="${editing ? '••••••••' : 'Mínimo 6 caracteres'}">
+                <input type="password" id="u-senha" autocomplete="new-password" placeholder="${editing ? '••••••••' : 'Mínimo 6 caracteres'}">
                 <button type="button" class="toggle-pass" id="toggleModalPass" aria-label="Mostrar senha"><i class="ti ti-eye"></i></button>
               </div>
               <div class="field-error">A senha deve ter pelo menos 6 caracteres.</div>
@@ -5876,6 +5876,7 @@ function pode(acao) {
           professores_list().forEach(p => { profsPorNome[p.nome.toLowerCase().trim()] = p.id; });
 
           const preview = [];
+          const usuariosReservadosNoLote = new Set();
           for (let r = 1; r < rows.length; r++) {
             if (rows[r].every(c => String(c).trim() === '')) continue; // pula linha vazia
 
@@ -5891,14 +5892,33 @@ function pode(acao) {
             const turmaId          = turmaNome ? (turmasPorNome[turmaNome.toLowerCase().trim()] || null) : null;
             const supervisorPadraoId = profNome ? (profsPorNome[profNome.toLowerCase().trim()]  || null) : null;
 
+            const nomeCompleto = nome.split(/\s+/).filter(Boolean).length >= 2;
+
             const avisos = [];
-            if (!nome)                           avisos.push('Nome obrigatório');
+            if (!nome)          avisos.push('Nome obrigatório');
+            else if (!nomeCompleto) avisos.push('Nome precisa ter nome e sobrenome (usado para gerar o usuário de login)');
             if (turmaNome && !turmaId)           avisos.push(`Turma "${turmaNome}" não encontrada`);
             if (profNome  && !supervisorPadraoId) avisos.push(`Supervisor "${profNome}" não encontrado`);
 
-            preview.push({ linha: r + 1, nome, matricula, turmaNome, turmaId,
+            /* Gera o usuário de login já na pré-visualização, evitando
+               colisão tanto com quem já está cadastrado quanto com
+               outras linhas desta mesma planilha (ex: dois "João
+               Silva" viram joao.silva e joao.silva2). */
+            let usuario = '';
+            if (nomeCompleto) {
+              usuario = aluno_gerarUsuarioSugerido(nome);
+              while (usuario && usuariosReservadosNoLote.has(usuario)) {
+                const m = /^(.*?)(\d*)$/.exec(usuario);
+                const base = m[1];
+                const n = (m[2] ? parseInt(m[2], 10) : 1) + 1;
+                usuario = base + n;
+              }
+              if (usuario) usuariosReservadosNoLote.add(usuario);
+            }
+
+            preview.push({ linha: r + 1, nome, usuario, matricula, turmaNome, turmaId,
               profNome, supervisorPadraoId, email, telefone, observacoes,
-              avisos, valido: !!nome });
+              avisos, valido: !!nome && nomeCompleto });
           }
 
           if (preview.length === 0) {
@@ -5942,6 +5962,7 @@ function pode(acao) {
                 <tr>
                   <th style="width:48px;">Linha</th>
                   <th>Nome</th>
+                  <th>Usuário</th>
                   <th>Matrícula</th>
                   <th>Turma</th>
                   <th>Supervisor</th>
@@ -5954,6 +5975,9 @@ function pode(acao) {
                     <td class="mono" style="color:var(--ac-charcoal-soft);">${r.linha}</td>
                     <td style="font-weight:${r.nome ? '600' : '400'};color:${r.nome ? 'inherit' : 'var(--ac-danger)'};">
                       ${escapeHtml(r.nome || '(vazio)')}
+                    </td>
+                    <td class="mono" style="font-size:12px;color:${r.usuario ? 'var(--ac-charcoal-soft)' : 'var(--ac-danger)'};">
+                      ${escapeHtml(r.usuario || '—')}
                     </td>
                     <td class="mono" style="color:var(--ac-charcoal-soft);font-size:12px;">${escapeHtml(r.matricula || '—')}</td>
                     <td style="font-size:12px;color:${r.turmaNome && !r.turmaId ? 'var(--ac-warning)' : 'var(--ac-charcoal-soft)'};">
@@ -6008,7 +6032,7 @@ function pode(acao) {
         let sucesso = 0, falhou = 0;
         validos.forEach(r => {
           const res = alunos_create({
-            nome: r.nome, matricula: r.matricula,
+            nome: r.nome, usuario: r.usuario, matricula: r.matricula,
             turmaId: r.turmaId || null,
             supervisorPadraoId: r.supervisorPadraoId || null,
             email: r.email, telefone: r.telefone, observacoes: r.observacoes
