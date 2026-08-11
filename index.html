@@ -4166,7 +4166,7 @@ function modelos_disponiveisParaAluno(alunoId) {
   );
 }
 
-const FICHA_TIPOS_CAMPO = ['texto', 'data', 'numero'];
+const FICHA_TIPOS_CAMPO = ['texto', 'data', 'hora', 'numero'];
 function fichaModelo_normalizarTipo(tipo) {
   return FICHA_TIPOS_CAMPO.includes(tipo) ? tipo : 'texto';
 }
@@ -10529,6 +10529,9 @@ function pode(acao) {
     if (tipo === 'data') {
       return `<input type="date" data-campo="${s.id}" value="${escapeHtml(valorAtual || '')}">`;
     }
+    if (tipo === 'hora') {
+      return `<input type="time" data-campo="${s.id}" value="${escapeHtml(valorAtual || '')}">`;
+    }
     if (tipo === 'numero') {
       return `<input type="number" data-campo="${s.id}" value="${escapeHtml(valorAtual || '')}">`;
     }
@@ -11654,6 +11657,7 @@ function pode(acao) {
         <select data-sub-tipo="${s.id}" style="width:auto;flex-shrink:0;" title="Tipo de caractere aceito neste campo">
           <option value="texto" ${tipo === 'texto' ? 'selected' : ''}>Texto</option>
           <option value="data" ${tipo === 'data' ? 'selected' : ''}>Data</option>
+          <option value="hora" ${tipo === 'hora' ? 'selected' : ''}>Hora</option>
           <option value="numero" ${tipo === 'numero' ? 'selected' : ''}>Número</option>
         </select>
         <label style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;color:var(--ac-charcoal-soft);">
