@@ -2011,12 +2011,12 @@ function buildSeed() {
     },
     turmas: turmasPadrao,
     alunos: [
-      { id: aJoaoId,     nome: 'João Vitor de Almeida Figueiredo', usuario: 'joao.figueiredo',   email: 'joao.figueiredo@aluno.univag.edu.br', matricula: '2023014488', turmaId: t7Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(500) },
-      { id: aMariaId,    nome: 'Maria Eduarda Costa Lima',         usuario: 'maria.lima',        email: 'maria.lima@aluno.univag.edu.br',      matricula: '2023017732', turmaId: t7Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(490) },
-      { id: aCarinaId,   nome: 'Carina Oliveira Martins',          usuario: 'carina.martins',    email: 'carina.martins@aluno.univag.edu.br',  matricula: '2022009812', turmaId: t8Id, supervisorPadraoId: camilaId,  ativo: true, criadoEm: ago(480) },
-      { id: aLucasId,    nome: 'Lucas Henrique Pereira',           usuario: 'lucas.pereira',     email: 'lucas.pereira@aluno.univag.edu.br',   matricula: '2023021453', turmaId: t7Id, supervisorPadraoId: iagoId,    ativo: true, criadoEm: ago(470) },
-      { id: aFernandaId, nome: 'Fernanda Gomes de Souza',          usuario: 'fernanda.souza',    email: 'fernanda.souza@aluno.univag.edu.br',  matricula: '2022008891', turmaId: t8Id, supervisorPadraoId: camilaId,  ativo: true, criadoEm: ago(460) },
-      { id: aRafaelId,   nome: 'Rafael Souza Andrade',             usuario: 'rafael.andrade',    email: 'rafael.andrade@aluno.univag.edu.br',  matricula: '2023019204', turmaId: t6Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(450) }
+      { id: aJoaoId,     nome: 'João Vitor de Almeida Figueiredo', usuario: 'joao.figueiredo',   email: 'joao.figueiredo@aluno.univag.edu.br', matricula: '2023014488', turmaId: t7Id, supervisorPadraoId: sabrinaId, ativo: true, semestresIds: [semestreSeedId], criadoEm: ago(500) },
+      { id: aMariaId,    nome: 'Maria Eduarda Costa Lima',         usuario: 'maria.lima',        email: 'maria.lima@aluno.univag.edu.br',      matricula: '2023017732', turmaId: t7Id, supervisorPadraoId: sabrinaId, ativo: true, semestresIds: [semestreSeedId], criadoEm: ago(490) },
+      { id: aCarinaId,   nome: 'Carina Oliveira Martins',          usuario: 'carina.martins',    email: 'carina.martins@aluno.univag.edu.br',  matricula: '2022009812', turmaId: t8Id, supervisorPadraoId: camilaId,  ativo: true, semestresIds: [semestreSeedId], criadoEm: ago(480) },
+      { id: aLucasId,    nome: 'Lucas Henrique Pereira',           usuario: 'lucas.pereira',     email: 'lucas.pereira@aluno.univag.edu.br',   matricula: '2023021453', turmaId: t7Id, supervisorPadraoId: iagoId,    ativo: true, semestresIds: [semestreSeedId], criadoEm: ago(470) },
+      { id: aFernandaId, nome: 'Fernanda Gomes de Souza',          usuario: 'fernanda.souza',    email: 'fernanda.souza@aluno.univag.edu.br',  matricula: '2022008891', turmaId: t8Id, supervisorPadraoId: camilaId,  ativo: true, semestresIds: [semestreSeedId], criadoEm: ago(460) },
+      { id: aRafaelId,   nome: 'Rafael Souza Andrade',             usuario: 'rafael.andrade',    email: 'rafael.andrade@aluno.univag.edu.br',  matricula: '2023019204', turmaId: t6Id, supervisorPadraoId: sabrinaId, ativo: true, semestresIds: [semestreSeedId], criadoEm: ago(450) }
     ],
     avaliacoes: [
       /* ── João: Cardio (finalizada, SIS enviado) ── */
@@ -2619,6 +2619,31 @@ function db_migrate(data) {
     });
     data.version = 22; changed = true;
   }
+
+  // v23 — a matrícula do aluno no semestre passa a ser um campo direto
+  // (aluno.semestresIds) em vez de depender de estar na lista de
+  // alunos de alguma matéria daquele semestre. Isso corrige o cadastro
+  // que "sumia": o aluno era salvo normalmente, mas só aparecia em
+  // "Alunos" depois de alguém vinculá-lo a uma matéria — um segundo
+  // passo fácil de esquecer, principalmente na importação em lote.
+  // Migra o histórico sem perder nada: cada aluno recebe os semestres
+  // de todas as matérias em que já estava vinculado; quem nunca foi
+  // vinculado a nenhuma (exatamente o caso do bug) é matriculado no
+  // semestre ativo, para ficar visível imediatamente após a migração.
+  if (data.version < 23) {
+    const semestreAtivoMigracao =
+      (data.semestres || []).find(s => s.status === 'ativo') || (data.semestres || [])[0];
+    (data.alunos || []).forEach(aluno => {
+      if (Array.isArray(aluno.semestresIds)) return; // já migrado
+      const ids = new Set();
+      ((data.config && data.config.materias) || []).forEach(m => {
+        if (m.semestreId && (m.alunos || []).includes(aluno.id)) ids.add(m.semestreId);
+      });
+      if (!ids.size && semestreAtivoMigracao) ids.add(semestreAtivoMigracao.id);
+      aluno.semestresIds = Array.from(ids);
+    });
+    data.version = 23; changed = true;
+  }
   return changed;
 }
 
@@ -3126,6 +3151,7 @@ function alunos_create(payload) {
   if (alunos_usuarioExists(usuario)) {
     return { ok: false, msg: 'Já existe um(a) aluno(a) cadastrado(a) com este usuário. Ajuste o campo "Usuário".' };
   }
+  const semestreAtualId = semestre_selecionadoId();
   const novo = {
     id: uid('aluno'),
     nome,
@@ -3137,6 +3163,11 @@ function alunos_create(payload) {
     supervisorPadraoId: payload.supervisorPadraoId || null,
     observacoes: (payload.observacoes || '').trim(),
     ativo: true,
+    /* Matrícula no semestre — o aluno aparece na tela "Alunos" e para
+       qualquer professor assim que é cadastrado, sem depender de ser
+       vinculado a uma matéria primeiro (isso continua existindo, mas
+       agora controla só quais fichas/cenários o aluno acessa). */
+    semestresIds: semestreAtualId ? [semestreAtualId] : [],
     criadoEm: new Date().toISOString()
   };
   db.alunos.push(novo);
@@ -3648,9 +3679,41 @@ function alunoIds_doSemestre(semestreId) {
   materias_doSemestre(semestreId).forEach(m => (m.alunos || []).forEach(aId => ids.add(aId)));
   return ids;
 }
+function alunos_doSemestre(semestreId) {
+  return alunos_list().filter(a => (a.semestresIds || []).includes(semestreId));
+}
 function alunos_doSemestreAtual() {
-  const ids = alunoIds_doSemestre(semestre_selecionadoId());
-  return alunos_list().filter(a => ids.has(a.id));
+  return alunos_doSemestre(semestre_selecionadoId());
+}
+
+/* Matricula um(a) aluno(a) já cadastrado(a) num semestre adicional —
+   usado quando ele(a) continua no semestre seguinte, ou para corrigir
+   alunos que ficaram sem nenhum semestre (bug de cadastro antigo). */
+function aluno_matricularNoSemestre(alunoId, semestreId) {
+  if (!semestreId) return { ok: false, msg: 'Nenhum semestre selecionado.' };
+  const db = db_load();
+  const aluno = db.alunos.find(a => a.id === alunoId);
+  if (!aluno) return { ok: false, msg: 'Aluno(a) não encontrado(a).' };
+  if (!Array.isArray(aluno.semestresIds)) aluno.semestresIds = [];
+  if (!aluno.semestresIds.includes(semestreId)) {
+    aluno.semestresIds.push(semestreId);
+    db_save(db);
+    logAction(`Aluno(a) matriculado(a) no semestre: ${aluno.nome}`);
+  }
+  return { ok: true, aluno };
+}
+
+/* Remove a matrícula de um(a) aluno(a) num semestre — não afeta o
+   cadastro em si nem o histórico de avaliações já lançadas, só some
+   da lista de "Alunos" quando aquele semestre estiver selecionado. */
+function aluno_desmatricularDoSemestre(alunoId, semestreId) {
+  const db = db_load();
+  const aluno = db.alunos.find(a => a.id === alunoId);
+  if (!aluno) return { ok: false, msg: 'Aluno(a) não encontrado(a).' };
+  aluno.semestresIds = (aluno.semestresIds || []).filter(id => id !== semestreId);
+  db_save(db);
+  logAction(`Aluno(a) removido(a) do semestre: ${aluno.nome}`);
+  return { ok: true, aluno };
 }
 
 /* Matérias onde o professor está vinculado como supervisor — usado
@@ -5146,6 +5209,12 @@ function pode(acao) {
     const session = session_get();
     const canManage = (window.pode ? pode('gerenciarAlunos') : ['admin', 'professor'].includes(session && session.papel));
 
+    const semestreAtualId = semestre_selecionadoId();
+    const idsNoSemestre = new Set(alunos_doSemestreAtual().map(a => a.id));
+    const candidatosMatricula = canManage
+      ? alunos_list().filter(a => a.ativo && !idsNoSemestre.has(a.id))
+      : [];
+
     container.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap;">
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
@@ -5159,7 +5228,15 @@ function pode(acao) {
             <option value="todos">Todos</option>
           </select>
         </div>
-        ${canManage ? '<button class="btn btn-accent" id="btnNovoAluno"><i class="ti ti-user-plus"></i> Novo(a) aluno(a)</button>' : ''}
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          ${candidatosMatricula.length ? `
+            <select id="aMatricularSelect" style="font-size:13px;padding:0.62rem 0.7rem;border-radius:var(--radius-md);border:1px solid var(--ac-line-strong);max-width:240px;" aria-label="Matricular aluno já cadastrado no semestre atual" title="Matricula, no semestre selecionado no topo, um(a) aluno(a) que já foi cadastrado(a) antes (ex.: continuando de outro semestre).">
+              <option value="">+ Matricular já cadastrado(a)…</option>
+              ${candidatosMatricula.map(a => `<option value="${a.id}">${escapeHtml(a.nome)}</option>`).join('')}
+            </select>
+          ` : ''}
+          ${canManage ? '<button class="btn btn-accent" id="btnNovoAluno"><i class="ti ti-user-plus"></i> Novo(a) aluno(a)</button>' : ''}
+        </div>
       </div>
 
       <div class="card">
@@ -5233,6 +5310,20 @@ function pode(acao) {
     if (canManage) {
       $('#btnNovoAluno', container).addEventListener('click', () => openAlunoModal(null, container, canManage));
       iniciarImportacao(container);
+      const selMatricular = $('#aMatricularSelect', container);
+      if (selMatricular) {
+        selMatricular.addEventListener('change', function () {
+          const aid = this.value;
+          if (!aid) return;
+          const res = aluno_matricularNoSemestre(aid, semestreAtualId);
+          if (!res.ok) { showToast(res.msg, 'danger'); return; }
+          showToast(`${res.aluno.nome} matriculado(a) neste semestre.`, 'success');
+          const opt = this.querySelector('option[value="' + aid + '"]');
+          if (opt) opt.remove();
+          this.value = '';
+          paintAlunosTable(container, canManage);
+        });
+      }
     }
 
     paintAlunosTable(container, canManage);
@@ -5343,6 +5434,7 @@ function pode(acao) {
     const editing = !!alunoId;
     const aluno = editing ? alunos_get(alunoId) : null;
     const readOnly = editing && !editable;
+    const semestreAtual = !editing ? semestre_get(semestre_selecionadoId()) : null;
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -5354,6 +5446,14 @@ function pode(acao) {
         </div>
         <div class="modal-body">
           <div id="alunoModalAlert"></div>
+          ${!editing ? `
+            <div class="field-hint" style="display:flex;gap:8px;align-items:flex-start;background:var(--ac-sand-dark);padding:0.6rem 0.8rem;border-radius:8px;margin-bottom:1rem;">
+              <i class="ti ti-calendar-event" style="margin-top:1px;"></i>
+              <span>${semestreAtual
+                ? `Será matriculado(a) no semestre <strong>${escapeHtml(semestreAtual.label)}</strong> (selecionado no topo da tela) — aparece na lista de Alunos assim que salvar, para todos os professores.`
+                : 'Nenhum semestre selecionado — cadastre um em "Configurações de parâmetros" → Semestres antes de continuar.'}</span>
+            </div>
+          ` : ''}
           <form id="alunoForm" novalidate>
             <div class="field-row">
               <div class="field" id="f-a-nome">
