@@ -3499,6 +3499,19 @@ function materias_doSemestreAtual() {
   return materias_doSemestre(semestre_selecionadoId());
 }
 
+/* IDs de alunos vinculados a alguma matéria de um semestre — a
+   "matrícula" do aluno naquele período letivo é justamente estar na
+   lista de alunos de ao menos uma matéria daquele semestre. */
+function alunoIds_doSemestre(semestreId) {
+  const ids = new Set();
+  materias_doSemestre(semestreId).forEach(m => (m.alunos || []).forEach(aId => ids.add(aId)));
+  return ids;
+}
+function alunos_doSemestreAtual() {
+  const ids = alunoIds_doSemestre(semestre_selecionadoId());
+  return alunos_list().filter(a => ids.has(a.id));
+}
+
 /* Matérias onde o professor está vinculado como supervisor — usado
    para restringir a quais matérias ele pode vincular um modelo de
    ficha (mesmo critério de "dono" usado no resto do app). */
@@ -5083,7 +5096,7 @@ function pode(acao) {
     const tbody = $('#aTableBody', container);
     const empty = $('#aEmptyState', container);
 
-    let lista = alunos_list();
+    let lista = alunos_doSemestreAtual();
     if (aCurrentStatus === 'ativos') lista = lista.filter(a => a.ativo);
     else if (aCurrentStatus === 'inativos') lista = lista.filter(a => !a.ativo);
 
