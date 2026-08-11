@@ -2609,6 +2609,16 @@ function db_migrate(data) {
     _limparDadosDeTeste(data);
     data.version = 21; changed = true;
   }
+
+  // v22 — "Vincular professores" nos modelos de ficha: além de quem
+  // criou, outros professores podem ser explicitamente vinculados
+  // pra também verem/editarem o modelo em "Cadastrar ficha".
+  if (data.version < 22) {
+    (data.fichaModelos || []).forEach(m => {
+      if (!Array.isArray(m.professoresIds)) m.professoresIds = [];
+    });
+    data.version = 22; changed = true;
+  }
   return changed;
 }
 
@@ -4303,13 +4313,14 @@ function fichaModelo_get(id) {
   return (db.fichaModelos || []).find(m => m.id === id) || null;
 }
 
-/* Modelos visíveis para gerenciamento — admin vê todos, professor só
-   os que ele mesmo criou (mesma lógica de "dono" usada em matérias). */
+/* Modelos visíveis para gerenciamento — admin vê todos; professor vê
+   os que criou OU os que foram explicitamente vinculados a ele (via
+   "Vincular professores"), mesmo criados por outra pessoa. */
 function fichaModelos_doProfessor(userId, isAdmin) {
   const db = db_load();
   const todos = (db.fichaModelos || []).slice().sort((a, b) => new Date(b.atualizadoEm) - new Date(a.atualizadoEm));
   if (isAdmin) return todos;
-  return todos.filter(m => m.criadoPorId === userId);
+  return todos.filter(m => m.criadoPorId === userId || (m.professoresIds || []).includes(userId));
 }
 
 /* Modelos disponíveis para um aluno lançar uma ficha nova — todo
@@ -4346,10 +4357,13 @@ function fichaModelo_create(payload) {
 
   const agora = new Date().toISOString();
   const session = session_get();
+  let professoresIds = Array.isArray(payload.professoresIds) ? payload.professoresIds.slice() : [];
+  if (!professoresIds.length && session && session.papel === 'professor') professoresIds = [session.id];
   const modelo = {
     id: uid('modelo'),
     titulo,
     materiasIds: Array.isArray(payload.materiasIds) ? payload.materiasIds.slice() : [],
+    professoresIds,
     criadoPorId: session ? session.id : null,
     criadoEm: agora,
     atualizadoEm: agora,
@@ -4381,6 +4395,7 @@ function fichaModelo_update(id, payload) {
 
   modelo.titulo = titulo;
   if (Array.isArray(payload.materiasIds)) modelo.materiasIds = payload.materiasIds.slice();
+  if (Array.isArray(payload.professoresIds)) modelo.professoresIds = payload.professoresIds.slice();
   modelo.topicos = topicos.map(t => ({
     id: t.id || uid('topico'),
     titulo: t.titulo.trim(),
@@ -11754,7 +11769,7 @@ function pode(acao) {
     try { return new Date(iso).toLocaleDateString('pt-BR'); } catch (e) { return iso; }
   }
 
-  let draftModelo = null;   // { id?, titulo, materiasIds:[], topicos:[{id,titulo,subtopicos:[{id,titulo,obrigatorio}]}] }
+  let draftModelo = null;   // { id?, titulo, materiasIds:[], professoresIds:[], topicos:[{id,titulo,subtopicos:[{id,titulo,obrigatorio}]}] }
   let editingModeloId = null;
 
   function renderFichaModelosView(container) {
@@ -11801,7 +11816,8 @@ function pode(acao) {
     `;
 
     $('#btnNovoModelo', container).addEventListener('click', () => {
-      draftModelo = { titulo: '', materiasIds: [], topicos: [fichaModelo_topicoVazio()] };
+      const sess = session_get();
+      draftModelo = { titulo: '', materiasIds: [], professoresIds: sess && sess.papel === 'professor' ? [sess.id] : [], topicos: [fichaModelo_topicoVazio()] };
       editingModeloId = null;
       paintEditor(container);
     });
@@ -11811,7 +11827,7 @@ function pode(acao) {
         e.stopPropagation();
         const modelo = fichaModelo_get(btn.dataset.id);
         editingModeloId = modelo.id;
-        draftModelo = JSON.parse(JSON.stringify({ titulo: modelo.titulo, materiasIds: modelo.materiasIds, topicos: modelo.topicos }));
+        draftModelo = JSON.parse(JSON.stringify({ titulo: modelo.titulo, materiasIds: modelo.materiasIds, professoresIds: modelo.professoresIds || [], topicos: modelo.topicos }));
         paintEditor(container);
       });
     });
@@ -11826,6 +11842,7 @@ function pode(acao) {
 
   function htmlCardModelo(m) {
     const materias = (m.materiasIds || []).map(id => materia_get(id)).filter(Boolean);
+    const profsVinculados = (m.professoresIds || []).map(id => users_get(id)).filter(Boolean);
     const totalSub = (m.topicos || []).reduce((s, t) => s + (t.subtopicos || []).length, 0);
     return `
       <div class="card card-pad">
@@ -11833,12 +11850,17 @@ function pode(acao) {
         <div style="font-size:12px;color:var(--ac-charcoal-soft);margin-bottom:8px;">
           ${(m.topicos || []).length} tópico${(m.topicos || []).length === 1 ? '' : 's'} · ${totalSub} campo${totalSub === 1 ? '' : 's'}
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;">
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;">
           ${materias.length
             ? materias.map(mt => `<span class="badge badge-neutral" style="font-size:10.5px;">${escapeHtml(mt.nome)}</span>`).join('')
             : '<span class="badge badge-warning" style="font-size:10.5px;">Sem matéria vinculada — nenhum aluno vê ainda</span>'
           }
         </div>
+        ${profsVinculados.length ? `
+          <div style="font-size:11px;color:var(--ac-charcoal-soft);margin-bottom:8px;">
+            <i class="ti ti-users"></i> ${profsVinculados.map(p => escapeHtml(p.nome)).join(', ')}
+          </div>
+        ` : ''}
         <div style="font-size:11px;color:var(--ac-charcoal-soft);margin-bottom:10px;">Atualizado em ${fmtData(m.atualizadoEm)}</div>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-ghost btn-sm modelo-card-editar" data-id="${m.id}"><i class="ti ti-edit"></i> Editar</button>
@@ -11915,6 +11937,12 @@ function pode(acao) {
       if (el.checked && idx === -1) draftModelo.materiasIds.push(mid);
       if (!el.checked && idx !== -1) draftModelo.materiasIds.splice(idx, 1);
     });
+    $all('[data-professor-check]', container).forEach(el => {
+      const pid = el.dataset.professorCheck;
+      const idx = draftModelo.professoresIds.indexOf(pid);
+      if (el.checked && idx === -1) draftModelo.professoresIds.push(pid);
+      if (!el.checked && idx !== -1) draftModelo.professoresIds.splice(idx, 1);
+    });
   }
 
   function htmlSubtopico(topicoId, s, idx, total) {
@@ -11960,6 +11988,7 @@ function pode(acao) {
     const isAdmin = session.papel === 'admin';
     const materiasDisp = (isAdmin ? materias_list() : materias_visiveisParaProfessor(session.id))
       .filter(m => m.semestreId === semestre_selecionadoId());
+    const professoresDisp = professores_list();
 
     container.innerHTML = `
       <div class="report-toolbar no-print">
@@ -11986,6 +12015,24 @@ function pode(acao) {
                 <label style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--ac-sand);padding:6px 10px;border-radius:8px;cursor:pointer;">
                   <input type="checkbox" data-materia-check="${m.id}" ${draftModelo.materiasIds.includes(m.id) ? 'checked' : ''}>
                   ${escapeHtml(m.nome)}
+                </label>
+              `).join('')}
+            </div>
+          `}
+        </div>
+      </div>
+
+      <div class="card card-pad" style="margin-bottom:1.25rem;">
+        <div class="field" style="margin-bottom:0;">
+          <label>Vincular professores — além de quem criou, esses professores também verão e poderão editar esta ficha em "Cadastrar ficha"</label>
+          ${professoresDisp.length === 0 ? `
+            <div class="field-hint">Nenhum professor cadastrado ainda.</div>
+          ` : `
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
+              ${professoresDisp.map(p => `
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--ac-sand);padding:6px 10px;border-radius:8px;cursor:pointer;">
+                  <input type="checkbox" data-professor-check="${p.id}" ${draftModelo.professoresIds.includes(p.id) ? 'checked' : ''}>
+                  ${escapeHtml(p.nome)}
                 </label>
               `).join('')}
             </div>
@@ -12066,6 +12113,7 @@ function pode(acao) {
       const payload = {
         titulo: draftModelo.titulo,
         materiasIds: draftModelo.materiasIds,
+        professoresIds: draftModelo.professoresIds,
         topicos: draftModelo.topicos
       };
       const r = editingModeloId
