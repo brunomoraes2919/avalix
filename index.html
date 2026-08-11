@@ -1577,7 +1577,16 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
 
 const DB_KEY = 'avaliaclin_db_v5';
 
-/* ── Supabase (sync em background, nunca bloqueia o app) ──── */
+/* ── Supabase (sync em background, nunca bloqueia o app) ────
+   Antes disso, cada sincronização baixava/enviava o banco INTEIRO
+   e sobrescrevia um lado com o outro — então se duas pessoas
+   cadastrassem coisas diferentes (ex.: um professor num aparelho e
+   um aluno em outro) em poucos segundos de diferença, quem
+   sincronizasse por último apagava silenciosamente o que a outra
+   pessoa tinha acabado de salvar. Agora cada sincronização faz uma
+   MESCLA: listas com "id" (alunos, users, avaliações etc.) são
+   unidas em vez de uma substituir a outra, então cadastros feitos
+   em aparelhos diferentes ao mesmo tempo sobrevivem os dois. */
 var _supa = {
   url: 'https://kghaucdhcipxetuilnfw.supabase.co',
   key: 'sb_publishable_0KLnqY5ufU4CwgXfnHQHcQ_MGSCmpKe',
@@ -1593,57 +1602,193 @@ function _supaFetch(path, opts) {
   return fetch(_supa.url + path, Object.assign({ headers: headers }, opts || {}));
 }
 
-/* Puxa dados do Supabase → localStorage. Chamado 1x no boot. */
-function _supaPull() {
-  var raw = localStorage.getItem(DB_KEY);
-  if (raw) {
-    /* Já temos dados locais — verificar se estão completos */
-    try {
-      var local = JSON.parse(raw);
-      /* Se dados locais estão incompletos (vindo de sessão quebrada), resetar o seed */
-      if (!local || !local.alunos || local.alunos.length < 3 || !local.config || !local.config.cenarios || local.config.cenarios.length < 2) {
-        localStorage.removeItem(DB_KEY);
-        /* Seed será recriado pelo db_load na próxima chamada */
-        if (typeof db_load === 'function') db_load();
-      }
-    } catch(e) { localStorage.removeItem(DB_KEY); }
-    /* Enviar dados locais para o Supabase (sempre sincroniza na abertura) */
-    _supaSchedule();
-    return;
-  }
-  /* localStorage vazio (novo usuário/browser) → tenta buscar dados compartilhados */
-  _supaFetch('/rest/v1/avaliaclin_dados?id=eq.principal&select=dados', { cache: 'no-store' })
-    .then(function(r) { return r.ok ? r.json() : null; })
-    .then(function(rows) {
-      if (rows && rows[0] && rows[0].dados) {
-        localStorage.setItem(DB_KEY, JSON.stringify(rows[0].dados));
-        try { if (typeof refreshLoginStats === 'function') refreshLoginStats(); } catch(e) {}
-        try { if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge(); } catch(e) {}
-      } else {
-        /* Supabase vazio → envia o seed local para compartilhar */
-        _supaSchedule();
-      }
-    })
-    .catch(function() {});
+function _supaFetchDadosRemotos() {
+  return _supaFetch('/rest/v1/avaliaclin_dados?id=eq.principal&select=dados,atualizado_em', { cache: 'no-store' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (rows) { return (rows && rows[0]) ? rows[0] : null; })
+    .catch(function () { return null; });
 }
 
-/* Envia localStorage → Supabase. Chamado após cada db_save (debounce 2s). */
-function _supaPush() {
+/* Une duas listas pelo campo "id": tudo que existe só de um lado é
+   mantido; no mesmo id dos dois lados, a lista "prioritaria" vence.
+   campoOrdenacao (opcional) reordena o resultado (usado em listas
+   tipo log, mais recente primeiro). */
+function _supaMergeListaPorId(base, prioritaria, campoOrdenacao) {
+  var mapa = {};
+  (Array.isArray(base) ? base : []).forEach(function (item) {
+    if (item && item.id != null) mapa[item.id] = item;
+  });
+  (Array.isArray(prioritaria) ? prioritaria : []).forEach(function (item) {
+    if (item && item.id != null) mapa[item.id] = item;
+  });
+  var lista = Object.keys(mapa).map(function (k) { return mapa[k]; });
+  if (campoOrdenacao) {
+    lista.sort(function (a, b) { return new Date(b[campoOrdenacao] || 0) - new Date(a[campoOrdenacao] || 0); });
+  }
+  return lista;
+}
+
+/* Vínculos de aluno/professor numa matéria são sempre UNIDOS (nunca
+   um lado apaga o vínculo que o outro lado acabou de criar). */
+function _supaMergeMateria(m1, m2) {
+  var mesclada = Object.assign({}, m1, m2);
+  mesclada.alunos = Array.from(new Set([].concat(m1.alunos || [], m2.alunos || [])));
+  mesclada.supervisores = Array.from(new Set([].concat(m1.supervisores || [], m2.supervisores || [])));
+  return mesclada;
+}
+
+/* Mescla dois bancos completos. "prioridade" diz quem vence quando o
+   MESMO id foi alterado dos dois lados: 'local' (usado antes de
+   enviar — a mudança que acabou de ser feita nesta aba vence) ou
+   'remoto' (usado ao receber — adota o que já está compartilhado,
+   mas sem descartar nada que só existe localmente ainda). */
+function _supaMergeDados(local, remoto, prioridade) {
+  if (!remoto) return local;
+  if (!local) return remoto;
+  var base = prioridade === 'local' ? remoto : local;
+  var prio = prioridade === 'local' ? local : remoto;
+
+  var m = {};
+  m.version = Math.max(local.version || 0, remoto.version || 0);
+  m.alunos = _supaMergeListaPorId(base.alunos, prio.alunos);
+  m.users = _supaMergeListaPorId(base.users, prio.users);
+  m.avaliacoes = _supaMergeListaPorId(base.avaliacoes, prio.avaliacoes);
+  m.fichasClinicas = _supaMergeListaPorId(base.fichasClinicas, prio.fichasClinicas);
+  m.pacientes = _supaMergeListaPorId(base.pacientes, prio.pacientes);
+  m.fichaModelos = _supaMergeListaPorId(base.fichaModelos, prio.fichaModelos);
+  m.turmas = _supaMergeListaPorId(base.turmas, prio.turmas);
+  m.semestres = _supaMergeListaPorId(base.semestres, prio.semestres);
+  m.resetTokens = _supaMergeListaPorId(base.resetTokens, prio.resetTokens);
+  m.notificacoes = _supaMergeListaPorId(base.notificacoes, prio.notificacoes, 'criadoEm').slice(0, 200);
+  m.auditLog = _supaMergeListaPorId(base.auditLog, prio.auditLog, 'quando').slice(0, 200);
+
+  var configBase = base.config || {};
+  var configPrio = prio.config || {};
+  m.config = Object.assign({}, configBase, configPrio);
+  m.config.materias = _supaMergeListaPorId(configBase.materias, configPrio.materias).map(function (mat) {
+    var mBase = (configBase.materias || []).find(function (x) { return x.id === mat.id; });
+    var mPrio = (configPrio.materias || []).find(function (x) { return x.id === mat.id; });
+    return (mBase && mPrio) ? _supaMergeMateria(mBase, mPrio) : mat;
+  });
+  m.config.cenarios = _supaMergeListaPorId(configBase.cenarios, configPrio.cenarios);
+
+  m.instituicao = Object.assign({}, base.instituicao, prio.instituicao);
+  return m;
+}
+
+/* Puxa dados do Supabase → localStorage, mesclando com o que já
+   existe localmente. Chamado 1x no boot. */
+function _supaPull() {
+  var raw = localStorage.getItem(DB_KEY);
+  var local = null;
+  try { local = raw ? JSON.parse(raw) : null; } catch (e) { local = null; }
+
+  _supaFetchDadosRemotos().then(function (row) {
+    if (row && row.dados) {
+      var mesclado = local ? _supaMergeDados(local, row.dados, 'remoto') : row.dados;
+      localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
+      _supaLastTs = row.atualizado_em;
+      try { if (typeof refreshLoginStats === 'function') refreshLoginStats(); } catch(e) {}
+      try { if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge(); } catch(e) {}
+    }
+    /* Sempre sincroniza na abertura — garante que qualquer coisa feita
+       offline (ou a própria mesclagem, se ela mudou algo) chegue ao
+       Supabase mesmo que o usuário não edite nada nesta sessão. */
+    _supaSchedule();
+  });
+}
+
+/* Versão da pull que devolve uma Promise e nunca demora mais que
+   `timeoutMs` — usada antes de conferir login, pra reduzir o caso de
+   "criei um usuário no computador e não consigo entrar no celular"
+   por causa do celular ainda não ter sincronizado. Nunca rejeita: se
+   der erro ou estourar o tempo, resolve mesmo assim (login continua
+   funcionando com os dados que já existirem localmente). */
+function _supaPullAguardando(timeoutMs) {
+  return new Promise(function (resolve) {
+    var resolvido = false;
+    var acabar = function () { if (!resolvido) { resolvido = true; resolve(); } };
+    setTimeout(acabar, timeoutMs);
+
+    var raw = localStorage.getItem(DB_KEY);
+    var local = null;
+    try { local = raw ? JSON.parse(raw) : null; } catch (e) { local = null; }
+
+    _supaFetchDadosRemotos().then(function (row) {
+      if (row && row.dados) {
+        var mesclado = local ? _supaMergeDados(local, row.dados, 'remoto') : row.dados;
+        localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
+        _supaLastTs = row.atualizado_em;
+      }
+      acabar();
+    }).catch(acabar);
+  });
+}
+
+/* Envia localStorage → Supabase. Chamado após cada db_save (debounce
+   2s). Busca o que está no Supabase primeiro e mescla com prioridade
+   local (a mudança feita agora, nesta aba, vence em caso de conflito
+   no mesmo id) — assim o envio nunca apaga um cadastro que outra
+   pessoa/aparelho tenha enviado nesse meio-tempo. Além da mesclagem,
+   usa concorrência otimista: só grava se ninguém alterou o registro
+   entre a leitura e a escrita; se alterou, busca de novo, mescla de
+   novo e tenta de novo — fecha a brecha de dois aparelhos lendo o
+   mesmo estado "antigo" ao mesmo tempo e um deles escrevendo por
+   cima do que o outro acabou de enviar. */
+function _supaPushComTentativas(tentativasRestantes) {
   var raw = localStorage.getItem(DB_KEY);
   if (!raw) return;
-  try {
-    var dados = JSON.parse(raw);
-    _supaFetch('/rest/v1/avaliaclin_dados', {
-      method: 'POST',
+  var local;
+  try { local = JSON.parse(raw); } catch (e) { return; }
+
+  _supaFetchDadosRemotos().then(function (row) {
+    var mesclado = (row && row.dados) ? _supaMergeDados(local, row.dados, 'local') : local;
+    localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
+    var agora = new Date().toISOString();
+
+    if (!row) {
+      /* Ainda não existe nenhuma linha no Supabase — primeira
+         sincronização deste banco; cria a linha. */
+      return _supaFetch('/rest/v1/avaliaclin_dados', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + _supa.key,
+          'apikey': _supa.key,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates,return=representation'
+        },
+        body: JSON.stringify({ id: 'principal', dados: mesclado, atualizado_em: agora })
+      });
+    }
+
+    /* Já existe linha — só grava se "atualizado_em" continuar sendo
+       exatamente o que acabei de ler (ninguém escreveu no meio do
+       caminho entre minha leitura e minha escrita). */
+    return _supaFetch('/rest/v1/avaliaclin_dados?id=eq.principal&atualizado_em=eq.' + encodeURIComponent(row.atualizado_em), {
+      method: 'PATCH',
       headers: {
         'Authorization': 'Bearer ' + _supa.key,
         'apikey': _supa.key,
         'Content-Type': 'application/json',
-        'Prefer': 'resolution=merge-duplicates,return=minimal'
+        'Prefer': 'return=representation'
       },
-      body: JSON.stringify({ id: 'principal', dados: dados, atualizado_em: new Date().toISOString() })
-    }).catch(function() {});
-  } catch(e) {}
+      body: JSON.stringify({ dados: mesclado, atualizado_em: agora })
+    });
+  }).then(function (r) { return r && r.ok ? r.json() : []; })
+    .then(function (rows) {
+      if (rows && rows[0] && rows[0].atualizado_em) {
+        _supaLastTs = rows[0].atualizado_em;
+        return;
+      }
+      /* 0 linhas afetadas = alguém gravou entre minha leitura e minha
+         escrita — busca a versão mais nova, mescla e tenta de novo. */
+      if (tentativasRestantes > 0) _supaPushComTentativas(tentativasRestantes - 1);
+    })
+    .catch(function() {});
+}
+
+function _supaPush() {
+  _supaPushComTentativas(4);
 }
 
 function _supaSchedule() {
@@ -1651,7 +1796,7 @@ function _supaSchedule() {
   _supa.timer = setTimeout(_supaPush, 2000);
 }
 
-/* ── Polling: verifica Supabase a cada 30s e sincroniza se houver novidade ── */
+/* ── Polling: verifica Supabase a cada 5s e mescla se houver novidade ── */
 var _supaLastTs = null;   // último atualizado_em visto no Supabase
 var _supaMyPush = 0;      // quando EU fiz o último push (ms)
 
@@ -1670,25 +1815,25 @@ function _supaPollCheck() {
       var remoteTs = rows[0].atualizado_em;
       if (_supaLastTs && remoteTs === _supaLastTs) return; // nada mudou
       _supaLastTs = remoteTs;
-      /* Baixar dados completos e atualizar localStorage */
-      _supaFetch('/rest/v1/avaliaclin_dados?id=eq.principal&select=dados', { cache: 'no-store' })
-        .then(function(r) { return r.ok ? r.json() : null; })
-        .then(function(dr) {
-          if (!dr || !dr[0] || !dr[0].dados) return;
-          localStorage.setItem(DB_KEY, JSON.stringify(dr[0].dados));
-          /* Atualizar a tela atual suavemente */
-          try {
-            var activeBtn = document.querySelector('.nav-item.active');
-            var view = activeBtn ? activeBtn.dataset.view : null;
-            if (view && window.AvaliaClinNavigate) {
-              window.AvaliaClinNavigate(view);
-            }
-            if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge();
-            if (typeof window.paintNotifList === 'function') window.paintNotifList();
-            /* Toast removido no polling rápido (5s) para não piscar */
-          } catch(e) {}
-        })
-        .catch(function() {});
+      _supaFetchDadosRemotos().then(function (row) {
+        if (!row || !row.dados) return;
+        var raw = localStorage.getItem(DB_KEY);
+        var local = null;
+        try { local = raw ? JSON.parse(raw) : null; } catch (e) { local = null; }
+        var mesclado = local ? _supaMergeDados(local, row.dados, 'remoto') : row.dados;
+        localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
+        /* Atualizar a tela atual suavemente */
+        try {
+          var activeBtn = document.querySelector('.nav-item.active');
+          var view = activeBtn ? activeBtn.dataset.view : null;
+          if (view && window.AvaliaClinNavigate) {
+            window.AvaliaClinNavigate(view);
+          }
+          if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge();
+          if (typeof window.paintNotifList === 'function') window.paintNotifList();
+          /* Toast removido no polling rápido (5s) para não piscar */
+        } catch(e) {}
+      });
     })
     .catch(function() {});
 }
@@ -9862,13 +10007,31 @@ function pode(acao) {
       if (!senha) { setFieldError('#field-senha', true); valid = false; } else setFieldError('#field-senha', false);
       if (!valid) return;
 
-      const res = auth_login(email, senha);
-      if (!res.ok) {
-        renderAlert('#login-alert', 'danger', res.msg);
-        return;
+      const btnEntrar = form.querySelector('button[type="submit"]');
+      const rotuloOriginal = btnEntrar ? btnEntrar.innerHTML : '';
+      if (btnEntrar) { btnEntrar.disabled = true; btnEntrar.innerHTML = '<i class="ti ti-loader-2"></i> Entrando…'; }
+
+      /* Busca a versão mais recente antes de conferir a senha — evita
+         "usuário ou senha incorretos" quando o cadastro foi feito em
+         outro aparelho há pouco tempo e este ainda não sincronizou.
+         Tem um limite de 2.5s: se a rede estiver lenta ou fora do ar,
+         o login continua normalmente com os dados que já existirem
+         localmente, em vez de travar a tela. */
+      const tentarLogin = function () {
+        const res = auth_login(email, senha);
+        if (btnEntrar) { btnEntrar.disabled = false; btnEntrar.innerHTML = rotuloOriginal; }
+        if (!res.ok) {
+          renderAlert('#login-alert', 'danger', res.msg);
+          return;
+        }
+        renderAlert('#login-alert', '', '');
+        enterApp();
+      };
+      if (typeof _supaPullAguardando === 'function') {
+        _supaPullAguardando(2500).then(tentarLogin);
+      } else {
+        tentarLogin();
       }
-      renderAlert('#login-alert', '', '');
-      enterApp();
     });
 
     $('#toggleLoginPass').addEventListener('click', function () {
