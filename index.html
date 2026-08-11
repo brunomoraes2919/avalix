@@ -1354,18 +1354,18 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <div id="form-login">
         <div class="eyebrow">Tela de acesso</div>
         <h2>Entrar na plataforma</h2>
-        <p class="sub">Use o e-mail e a senha cadastrados pelo administrador.</p>
+        <p class="sub">Professores e administradores usam e-mail; alunos(as) usam o usuário cadastrado. Senha conforme cadastrado pelo administrador.</p>
 
         <div id="login-alert"></div>
 
         <form id="loginForm" novalidate>
           <div class="field" id="field-email">
-            <label for="login-email">E-mail</label>
+            <label for="login-email">E-mail (equipe) ou usuário (aluno)</label>
             <div class="input-icon-wrap">
               <i class="ti ti-mail"></i>
-              <input type="email" id="login-email" autocomplete="username" placeholder="seunome@avaliaclin.com">
+              <input type="text" id="login-email" autocomplete="username" placeholder="seunome@avaliaclin.com ou bruno.moraes">
             </div>
-            <div class="field-error">Informe um e-mail válido.</div>
+            <div class="field-error">Informe seu e-mail (equipe) ou usuário (aluno).</div>
           </div>
 
           <div class="field" id="field-senha">
@@ -1974,12 +1974,12 @@ function buildSeed() {
     },
     turmas: turmasPadrao,
     alunos: [
-      { id: aJoaoId,     nome: 'João Vitor de Almeida Figueiredo', email: 'joao.figueiredo@aluno.univag.edu.br', matricula: '2023014488', turmaId: t7Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(500) },
-      { id: aMariaId,    nome: 'Maria Eduarda Costa Lima',         email: 'maria.lima@aluno.univag.edu.br',      matricula: '2023017732', turmaId: t7Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(490) },
-      { id: aCarinaId,   nome: 'Carina Oliveira Martins',          email: 'carina.martins@aluno.univag.edu.br',  matricula: '2022009812', turmaId: t8Id, supervisorPadraoId: camilaId,  ativo: true, criadoEm: ago(480) },
-      { id: aLucasId,    nome: 'Lucas Henrique Pereira',           email: 'lucas.pereira@aluno.univag.edu.br',   matricula: '2023021453', turmaId: t7Id, supervisorPadraoId: iagoId,    ativo: true, criadoEm: ago(470) },
-      { id: aFernandaId, nome: 'Fernanda Gomes de Souza',          email: 'fernanda.souza@aluno.univag.edu.br',  matricula: '2022008891', turmaId: t8Id, supervisorPadraoId: camilaId,  ativo: true, criadoEm: ago(460) },
-      { id: aRafaelId,   nome: 'Rafael Souza Andrade',             email: 'rafael.andrade@aluno.univag.edu.br',  matricula: '2023019204', turmaId: t6Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(450) }
+      { id: aJoaoId,     nome: 'João Vitor de Almeida Figueiredo', usuario: 'joao.figueiredo',   email: 'joao.figueiredo@aluno.univag.edu.br', matricula: '2023014488', turmaId: t7Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(500) },
+      { id: aMariaId,    nome: 'Maria Eduarda Costa Lima',         usuario: 'maria.lima',        email: 'maria.lima@aluno.univag.edu.br',      matricula: '2023017732', turmaId: t7Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(490) },
+      { id: aCarinaId,   nome: 'Carina Oliveira Martins',          usuario: 'carina.martins',    email: 'carina.martins@aluno.univag.edu.br',  matricula: '2022009812', turmaId: t8Id, supervisorPadraoId: camilaId,  ativo: true, criadoEm: ago(480) },
+      { id: aLucasId,    nome: 'Lucas Henrique Pereira',           usuario: 'lucas.pereira',     email: 'lucas.pereira@aluno.univag.edu.br',   matricula: '2023021453', turmaId: t7Id, supervisorPadraoId: iagoId,    ativo: true, criadoEm: ago(470) },
+      { id: aFernandaId, nome: 'Fernanda Gomes de Souza',          usuario: 'fernanda.souza',    email: 'fernanda.souza@aluno.univag.edu.br',  matricula: '2022008891', turmaId: t8Id, supervisorPadraoId: camilaId,  ativo: true, criadoEm: ago(460) },
+      { id: aRafaelId,   nome: 'Rafael Souza Andrade',             usuario: 'rafael.andrade',    email: 'rafael.andrade@aluno.univag.edu.br',  matricula: '2023019204', turmaId: t6Id, supervisorPadraoId: sabrinaId, ativo: true, criadoEm: ago(450) }
     ],
     avaliacoes: [
       /* ── João: Cardio (finalizada, SIS enviado) ── */
@@ -2537,6 +2537,28 @@ function db_migrate(data) {
     }
     data.version = 19; changed = true;
   }
+
+  // v20 — "usuário" de login do aluno (substitui o e-mail como
+  // identificador de acesso). Gera automaticamente pra quem já
+  // estava cadastrado, a partir do nome (primeiro-nome.sobrenome),
+  // sem quebrar o acesso de ninguém.
+  if (data.version < 20) {
+    const norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+    (data.alunos || []).forEach(a => {
+      if (a.usuario) return;
+      const partes = String(a.nome || '').trim().split(/\s+/).filter(Boolean);
+      let base;
+      if (partes.length >= 2) base = norm(partes[0]) + '.' + norm(partes[partes.length - 1]);
+      else if (partes.length === 1) base = norm(partes[0]) || 'aluno';
+      else base = 'aluno';
+      let candidato = base, n = 2;
+      while (data.alunos.some(x => x !== a && (x.usuario || '').toLowerCase() === candidato)) {
+        candidato = base + n; n++;
+      }
+      a.usuario = candidato;
+    });
+    data.version = 20; changed = true;
+  }
   return changed;
 }
 
@@ -2753,10 +2775,11 @@ function session_clear() {
 }
 
 /* ---------- Autenticação ---------- */
-function auth_login(email, senha) {
+function auth_login(identificador, senha) {
   const db = db_load();
-  // Tentativa 1 — usuário administrativo (admin / professor / visualizador)
-  const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+  const idNorm = String(identificador || '').toLowerCase().trim();
+  // Tentativa 1 — usuário administrativo (admin / professor / visualizador), por e-mail
+  const user = db.users.find(u => u.email.toLowerCase() === idNorm);
   if (user) {
     if (!user.ativo) return { ok: false, msg: 'Este usuário está inativo. Procure o administrador.' };
     if (user.senha !== senha) return { ok: false, msg: 'Senha incorreta.' };
@@ -2764,10 +2787,10 @@ function auth_login(email, senha) {
     logAction(`Login realizado por ${user.nome}`);
     return { ok: true, user };
   }
-  // Tentativa 2 — aluno (email cadastrado + matrícula como senha)
+  // Tentativa 2 — aluno (usuário de login cadastrado + matrícula como senha)
   const aluno = db.alunos.find(a =>
     a.ativo &&
-    (a.email || '').toLowerCase().trim() === email.toLowerCase().trim() &&
+    (a.usuario || '').toLowerCase().trim() === idNorm &&
     (a.matricula || '').trim() !== '' &&
     (a.matricula || '').trim() === senha.trim()
   );
@@ -2781,7 +2804,7 @@ function auth_login(email, senha) {
     logAction(`Login do aluno(a): ${aluno.nome}`);
     return { ok: true, user: sess };
   }
-  return { ok: false, msg: 'Credenciais inválidas. Verifique e-mail e senha (ou matrícula).' };
+  return { ok: false, msg: 'Credenciais inválidas. Verifique e-mail/usuário e senha (ou matrícula).' };
 }
 
 function auth_logout() {
@@ -2995,14 +3018,58 @@ function alunos_matriculaExists(matricula, ignoreId) {
   return db.alunos.some(a => a.matricula.trim() === matricula.trim() && a.id !== ignoreId);
 }
 
+/* "Usuário" de login do aluno — não é mais o e-mail. Gerado como
+   primeiro-nome.último-sobrenome (ex: "Bruno Alves de Moraes" →
+   "bruno.moraes"), sem acentos, minúsculo. Só letras (a-z). */
+function aluno_normalizarUsuarioTexto(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
+}
+function alunos_usuarioExists(usuario, ignoreId) {
+  const db = db_load();
+  return db.alunos.some(a => (a.usuario || '').toLowerCase() === String(usuario || '').toLowerCase().trim() && a.id !== ignoreId);
+}
+/* Sugere o usuário a partir do nome completo — retorna '' se o nome
+   não tiver pelo menos duas palavras (nome + sobrenome). Se o usuário
+   sugerido já existir, acrescenta um número (bruno.moraes2, ...). */
+function aluno_gerarUsuarioSugerido(nomeCompleto, ignoreId) {
+  const partes = String(nomeCompleto || '').trim().split(/\s+/).filter(Boolean);
+  if (partes.length < 2) return '';
+  const primeiro = aluno_normalizarUsuarioTexto(partes[0]);
+  const ultimo = aluno_normalizarUsuarioTexto(partes[partes.length - 1]);
+  if (!primeiro || !ultimo) return '';
+  const base = primeiro + '.' + ultimo;
+  let candidato = base, n = 2;
+  while (alunos_usuarioExists(candidato, ignoreId)) {
+    candidato = base + n;
+    n++;
+  }
+  return candidato;
+}
+
 function alunos_create(payload) {
   const db = db_load();
+  const nome = (payload.nome || '').trim();
+  if (!nome) return { ok: false, msg: 'Informe o nome do(a) aluno(a).' };
   if (payload.matricula && alunos_matriculaExists(payload.matricula)) {
     return { ok: false, msg: 'Já existe um(a) aluno(a) cadastrado(a) com esta matrícula.' };
   }
+  const partesNome = nome.split(/\s+/).filter(Boolean);
+  if (partesNome.length < 2) {
+    return { ok: false, msg: 'Digite o nome completo (nome e sobrenome) para gerar o usuário de login automaticamente.' };
+  }
+  let usuario = (payload.usuario || '').trim().toLowerCase();
+  if (!usuario) usuario = aluno_gerarUsuarioSugerido(nome);
+  if (!usuario) return { ok: false, msg: 'Não foi possível gerar o usuário — digite o nome completo (nome e sobrenome).' };
+  if (alunos_usuarioExists(usuario)) {
+    return { ok: false, msg: 'Já existe um(a) aluno(a) cadastrado(a) com este usuário. Ajuste o campo "Usuário".' };
+  }
   const novo = {
     id: uid('aluno'),
-    nome: payload.nome.trim(),
+    nome,
+    usuario,
     matricula: (payload.matricula || '').trim(),
     turmaId: payload.turmaId || null,
     email: (payload.email || '').trim(),
@@ -3024,6 +3091,20 @@ function alunos_update(id, payload) {
   if (!aluno) return { ok: false, msg: 'Aluno(a) não encontrado(a).' };
   if (payload.matricula && alunos_matriculaExists(payload.matricula, id)) {
     return { ok: false, msg: 'Já existe um(a) aluno(a) cadastrado(a) com esta matrícula.' };
+  }
+  if (payload.nome !== undefined) {
+    const partesNome = String(payload.nome || '').trim().split(/\s+/).filter(Boolean);
+    if (partesNome.length < 2) {
+      return { ok: false, msg: 'Digite o nome completo (nome e sobrenome) para gerar o usuário de login automaticamente.' };
+    }
+  }
+  if (payload.usuario !== undefined) {
+    const usuario = String(payload.usuario || '').trim().toLowerCase();
+    if (!usuario) return { ok: false, msg: 'Informe o usuário de login.' };
+    if (alunos_usuarioExists(usuario, id)) {
+      return { ok: false, msg: 'Já existe um(a) aluno(a) cadastrado(a) com este usuário. Ajuste o campo "Usuário".' };
+    }
+    aluno.usuario = usuario;
   }
   ['nome', 'matricula', 'email', 'telefone', 'observacoes'].forEach(k => {
     if (payload[k] !== undefined) aluno[k] = (payload[k] || '').toString().trim();
@@ -5213,16 +5294,22 @@ function pode(acao) {
               <div class="field" id="f-a-nome">
                 <label for="a-nome">Nome completo</label>
                 <input type="text" id="a-nome" ${readOnly ? 'disabled' : ''} placeholder="Ex: João Vitor de Almeida Figueiredo" value="${editing ? escapeHtml(aluno.nome) : ''}">
-                <div class="field-error">Informe o nome completo.</div>
+                <div class="field-error">Digite o nome completo (nome e sobrenome).</div>
               </div>
+              <div class="field" id="f-a-usuario">
+                <label for="a-usuario">Usuário (login)</label>
+                <input type="text" id="a-usuario" ${readOnly ? 'disabled' : ''} placeholder="Gerado a partir do nome" value="${editing ? escapeHtml(aluno.usuario || '') : ''}" autocomplete="off">
+                <div class="field-error">Já existe um(a) aluno(a) com este usuário.</div>
+                <div class="field-hint" id="a-usuario-hint">Gerado automaticamente ao digitar o nome completo — pode editar se quiser.</div>
+              </div>
+            </div>
+
+            <div class="field-row">
               <div class="field" id="f-a-matricula">
                 <label for="a-matricula">Matrícula</label>
                 <input type="text" id="a-matricula" ${readOnly ? 'disabled' : ''} placeholder="Ex: 2023014488" value="${editing ? escapeHtml(aluno.matricula) : ''}">
                 <div class="field-error">Já existe um(a) aluno(a) com esta matrícula.</div>
               </div>
-            </div>
-
-            <div class="field-row">
               <div class="field">
                 <label for="a-turma">Turma / período</label>
                 <select id="a-turma" ${readOnly ? 'disabled' : ''}>
@@ -5231,7 +5318,6 @@ function pode(acao) {
                 </select>
                 ${turmas_list().length === 0 ? '<div class="field-hint">Nenhuma turma cadastrada ainda — cadastre em "Turmas".</div>' : ''}
               </div>
-
             </div>
 
             <div class="field-row">
@@ -5274,7 +5360,7 @@ function pode(acao) {
     if (readOnly) return;
 
     function clearErrors() {
-      ['#f-a-nome', '#f-a-matricula'].forEach(s => $(s, overlay).classList.remove('has-error'));
+      ['#f-a-nome', '#f-a-matricula', '#f-a-usuario'].forEach(s => $(s, overlay).classList.remove('has-error'));
       $('#alunoModalAlert', overlay).innerHTML = '';
     }
     function showModalAlert(msg) {
@@ -5282,9 +5368,35 @@ function pode(acao) {
         '<div class="alert alert-danger"><i class="ti ti-alert-circle"></i><div>' + escapeHtml(msg) + '</div></div>';
     }
 
+    /* Gera o usuário automaticamente conforme o nome é digitado —
+       primeiro-nome.último-sobrenome. Para de gerar sozinho assim que
+       a pessoa edita o campo "Usuário" manualmente. */
+    let usuarioEditadoManualmente = editing && !!(aluno && aluno.usuario);
+    const inputNome = $('#a-nome', overlay);
+    const inputUsuario = $('#a-usuario', overlay);
+    const hintUsuario = $('#a-usuario-hint', overlay);
+
+    function atualizarSugestaoUsuario() {
+      if (usuarioEditadoManualmente) return;
+      const nomeAtual = inputNome.value.trim();
+      const partes = nomeAtual.split(/\s+/).filter(Boolean);
+      if (partes.length < 2) {
+        inputUsuario.value = '';
+        hintUsuario.textContent = 'Digite nome e sobrenome para gerar o usuário automaticamente.';
+        return;
+      }
+      const sugestao = aluno_gerarUsuarioSugerido(nomeAtual, editing ? alunoId : undefined);
+      inputUsuario.value = sugestao;
+      hintUsuario.textContent = 'Gerado automaticamente a partir do nome — pode editar se quiser.';
+    }
+    inputNome.addEventListener('input', atualizarSugestaoUsuario);
+    inputUsuario.addEventListener('input', () => { usuarioEditadoManualmente = true; });
+    if (!editing) atualizarSugestaoUsuario();
+
     overlay.querySelector('[data-act="save"]').addEventListener('click', function () {
       clearErrors();
       const nome = $('#a-nome', overlay).value.trim();
+      const usuario = $('#a-usuario', overlay).value.trim();
       const matricula = $('#a-matricula', overlay).value.trim();
       const turmaId = $('#a-turma', overlay).value || null;
       const email = $('#a-email', overlay).value.trim();
@@ -5292,10 +5404,19 @@ function pode(acao) {
       const observacoes = $('#a-obs', overlay).value.trim();
 
       let valid = true;
-      if (!nome) { $('#f-a-nome', overlay).classList.add('has-error'); valid = false; }
+      const partesNome = nome.split(/\s+/).filter(Boolean);
+      if (!nome || partesNome.length < 2) {
+        $('#f-a-nome', overlay).classList.add('has-error');
+        showModalAlert('Digite o nome completo (nome e sobrenome) — o usuário de login é gerado a partir dele.');
+        valid = false;
+      } else if (!usuario) {
+        $('#f-a-usuario', overlay).classList.add('has-error');
+        showModalAlert('Informe o usuário de login.');
+        valid = false;
+      }
       if (!valid) return;
 
-      const payload = { nome, matricula, turmaId, email, telefone, observacoes };
+      const payload = { nome, usuario, matricula, turmaId, email, telefone, observacoes };
       const res = editing ? alunos_update(alunoId, payload) : alunos_create(payload);
       if (!res.ok) { showModalAlert(res.msg); return; }
 
@@ -5899,7 +6020,7 @@ function pode(acao) {
         if (falhou === 0) {
           showToast(`${sucesso} aluno(s) importado(s) com sucesso.`, 'success');
         } else {
-          showToast(`${sucesso} importado(s), ${falhou} com erro (matrícula duplicada?). Verifique os demais individualmente.`, 'warning');
+          showToast(`${sucesso} importado(s), ${falhou} com erro (matrícula duplicada ou nome sem sobrenome?). Verifique os demais individualmente.`, 'warning');
         }
       });
     }
@@ -9548,7 +9669,7 @@ function pode(acao) {
       const senha = $('#login-senha').value;
 
       let valid = true;
-      if (!isValidEmail(email)) { setFieldError('#field-email', true); valid = false; } else setFieldError('#field-email', false);
+      if (!email) { setFieldError('#field-email', true); valid = false; } else setFieldError('#field-email', false);
       if (!senha) { setFieldError('#field-senha', true); valid = false; } else setFieldError('#field-senha', false);
       if (!valid) return;
 
