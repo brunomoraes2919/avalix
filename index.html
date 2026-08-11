@@ -3422,6 +3422,20 @@ function semestre_create(label) {
   logAction('Semestre cadastrado: ' + lbl);
   return { ok: true, semestre };
 }
+function semestre_update(id, label) {
+  const db = db_load();
+  const s = (db.semestres || []).find(x => x.id === id);
+  if (!s) return { ok: false, msg: 'Semestre não encontrado.' };
+  const lbl = String(label || '').trim();
+  if (!lbl) return { ok: false, msg: 'Informe o semestre (ex: 2026/1).' };
+  if (!/^\d{4}\/[12]$/.test(lbl)) return { ok: false, msg: 'Use o formato AAAA/1 ou AAAA/2 (ex: 2026/1).' };
+  if (db.semestres.some(x => x.id !== id && x.label === lbl)) return { ok: false, msg: 'Esse semestre já está cadastrado.' };
+  s.label = lbl;
+  s.atualizadoEm = new Date().toISOString();
+  db_save(db);
+  logAction('Semestre renomeado para: ' + lbl);
+  return { ok: true, semestre: s };
+}
 function semestre_encerrar(id) {
   const db = db_load();
   const s = (db.semestres || []).find(x => x.id === id);
@@ -6490,6 +6504,7 @@ function pode(acao) {
                   <td><span class="badge ${s.status === 'ativo' ? 'badge-success' : 'badge-neutral'}">${s.status === 'ativo' ? 'Ativo' : 'Encerrado'}</span></td>
                   <td>${totalMat}</td>
                   <td style="text-align:right;white-space:nowrap;">
+                    <button class="btn btn-ghost btn-sm sem-btn-editar" data-id="${s.id}"><i class="ti ti-edit"></i> Editar</button>
                     ${s.status === 'ativo'
                       ? `<button class="btn btn-ghost btn-sm sem-btn-encerrar" data-id="${s.id}"><i class="ti ti-lock"></i> Encerrar</button>`
                       : `<button class="btn btn-ghost btn-sm sem-btn-reabrir" data-id="${s.id}"><i class="ti ti-lock-open"></i> Reabrir</button>`
@@ -6520,6 +6535,10 @@ function pode(acao) {
       if (e.key === 'Enter') $('#btnAddSemestre', card).click();
     });
 
+    $all('.sem-btn-editar', card).forEach(btn => {
+      btn.addEventListener('click', () => abrirModalEditarSemestre(btn.dataset.id, container));
+    });
+
     $all('.sem-btn-encerrar', card).forEach(btn => {
       btn.addEventListener('click', () => {
         const r = semestre_encerrar(btn.dataset.id);
@@ -6539,6 +6558,51 @@ function pode(acao) {
         else showToast(r.msg, 'danger');
       });
     });
+  }
+
+  function abrirModalEditarSemestre(semestreId, container) {
+    const semestre = semestre_get(semestreId);
+    if (!semestre) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:380px;">
+        <div class="modal-head">
+          <h3>Editar semestre</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <div class="field" style="margin-bottom:0;">
+            <label>Semestre</label>
+            <input type="text" id="editarSemestreInput" value="${escapeHtml(semestre.label)}" placeholder="Ex: 2026/1">
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-primary" data-act="confirm"><i class="ti ti-device-floppy"></i> Salvar</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    const input = overlay.querySelector('#editarSemestreInput');
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('[data-act="confirm"]').click(); });
+    overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
+      const r = semestre_update(semestreId, input.value);
+      if (r.ok) {
+        close();
+        showToast('Semestre atualizado.', 'success');
+        renderSemestresCard(container);
+        if (window.refreshSemestreFiltro) refreshSemestreFiltro();
+      } else {
+        showToast(r.msg, 'danger');
+      }
+    });
+    document.body.appendChild(overlay);
+    input.focus();
+    input.select();
   }
 
   function renderGeraisCard(container) {
