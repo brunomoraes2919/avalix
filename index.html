@@ -7027,7 +7027,7 @@ function pode(acao) {
           <div style="text-align:center;padding:2rem;color:var(--ac-charcoal-soft);border:2px dashed var(--ac-line);border-radius:var(--radius-md);">
             <i class="ti ti-school" style="font-size:2rem;display:block;margin-bottom:.5rem;opacity:.4;"></i>
             ${isProfCfg ? 'Você ainda não foi vinculado(a) a nenhuma matéria neste semestre.' : 'Nenhuma matéria cadastrada neste semestre ainda.'}<br>
-            <span style="font-size:13px;">${isProfCfg ? 'Peça ao administrador para vincular seu perfil às matérias em que você leciona.' : 'Crie uma matéria (ela entra no semestre selecionado no filtro do topo) e adicione os cenários e professores.'}</span>
+            <span style="font-size:13px;">${isProfCfg ? 'Peça ao administrador para vincular seu perfil às matérias em que você leciona, ou clique em "Nova matéria" acima para criar uma — você já entra automaticamente como professor dela.' : 'Crie uma matéria (ela entra no semestre selecionado no filtro do topo) e adicione os cenários e professores.'}</span>
           </div>
         ` : materias.map((m, matIdx) => {
           const soma = materia_somaPesos(m);
@@ -7050,8 +7050,8 @@ function pode(acao) {
                 <span class="badge ${ok ? 'badge-success' : 'badge-warning'}" title="Soma dos pesos dos cenários">
                   ${ok ? '✓ 100%' : `⚠ ${somaPct}%`}
                 </span>
-                <button class="btn btn-ghost btn-sm mat-btn-edit" data-mat-id="${m.id}" title="Editar nome"><i class="ti ti-pencil"></i></button>
-                <button class="btn btn-ghost btn-sm mat-btn-save hidden" data-mat-id="${m.id}" title="Salvar nome"><i class="ti ti-check"></i></button>
+                <button class="btn btn-ghost btn-sm mat-btn-edit" data-mat-id="${m.id}" title="Editar nome e semestre desta matéria"><i class="ti ti-pencil"></i> Editar</button>
+                <button class="btn btn-primary btn-sm mat-btn-save hidden" data-mat-id="${m.id}" title="Salvar"><i class="ti ti-check"></i> Salvar</button>
                 <button class="btn btn-ghost btn-sm mat-btn-cancel hidden" data-mat-id="${m.id}" title="Cancelar"><i class="ti ti-x"></i></button>
                 <button class="btn btn-ghost btn-sm" data-mat-act="excluir" data-mat-id="${m.id}" title="Excluir matéria" style="color:var(--ac-danger);"><i class="ti ti-trash"></i></button>
               </div>
