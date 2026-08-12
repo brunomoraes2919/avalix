@@ -1492,6 +1492,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <div class="nav-section-label" id="nav-section-aluno" style="display:none;">Minha área</div>
       <button class="nav-item" data-view="aluno" style="display:none;"><i class="ti ti-chart-bar-popular"></i> Meu Desempenho</button>
       <button class="nav-item" data-view="fichasClinicas" style="display:none;"><i class="ti ti-file-description"></i> Fichas</button>
+      <button class="nav-item" data-view="minhasMensagens" style="display:none;position:relative;"><i class="ti ti-message-2"></i> Mensagens <span class="notif-badge hidden" id="msgAlunoBadge" style="position:static;margin-left:auto;">0</span></button>
 
       <div class="nav-section-label">Geral</div>
       <button class="nav-item active" data-view="dashboard"><i class="ti ti-layout-dashboard"></i> Painel geral</button>
@@ -1499,6 +1500,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <div class="nav-section-label">Avaliação</div>
       <button class="nav-item" data-view="alunos"><i class="ti ti-users"></i> Alunos</button>
       <button class="nav-item" data-view="avaliacoes"><i class="ti ti-clipboard-check"></i> Lançar notas</button>
+      <button class="nav-item" data-view="mensagensAlunos"><i class="ti ti-message-2"></i> Mensagens aos alunos</button>
       <button class="nav-item" data-view="relatorios"><i class="ti ti-file-report"></i> Relatórios em PDF</button>
       <button class="nav-item" data-view="fichasClinicasEquipe"><i class="ti ti-file-description"></i> Fichas</button>
       <button class="nav-item" data-view="fichaModelos"><i class="ti ti-forms"></i> Cadastrar ficha</button>
@@ -1646,7 +1648,7 @@ function _supaMergeListaPorId(base, prioritaria, removidos, campoOrdenacao) {
 /* Tipos de lista que têm exclusão manual pela tela (por isso
    precisam de lápide). notificações/log/resetTokens não têm exclusão
    manual, então não precisam. */
-var _SUPA_TIPOS_COM_LAPIDE = ['alunos', 'users', 'avaliacoes', 'fichasClinicas', 'pacientes', 'fichaModelos', 'turmas', 'semestres', 'materias', 'cenarios'];
+var _SUPA_TIPOS_COM_LAPIDE = ['alunos', 'users', 'avaliacoes', 'fichasClinicas', 'pacientes', 'fichaModelos', 'turmas', 'semestres', 'materias', 'cenarios', 'mensagensAluno'];
 
 /* Registra que um id foi excluído de propósito (chamado por toda
    função "_delete"/"_remover" do app) — assim, mesmo que outro
@@ -1835,6 +1837,7 @@ function _supaMergeDados(local, remoto, prioridade) {
   m.fichaModelos = _supaMergeListaPorId(base.fichaModelos, prio.fichaModelos, removidosUnidos.fichaModelos);
   m.turmas = _supaMergeListaPorId(base.turmas, prio.turmas, removidosUnidos.turmas);
   m.semestres = _supaMergeListaPorId(base.semestres, prio.semestres, removidosUnidos.semestres);
+  m.mensagensAluno = _supaMergeListaPorId(base.mensagensAluno, prio.mensagensAluno, removidosUnidos.mensagensAluno, 'criadoEm');
   m.resetTokens = _supaMergeListaPorId(base.resetTokens, prio.resetTokens, null);
   m.notificacoes = _supaMergeListaPorId(base.notificacoes, prio.notificacoes, null, 'criadoEm').slice(0, 200);
   m.auditLog = _supaMergeListaPorId(base.auditLog, prio.auditLog, null, 'quando').slice(0, 200);
@@ -2540,6 +2543,7 @@ function db_migrate(data) {
   if (!Array.isArray(data.users)) data.users = [];
   if (!Array.isArray(data.alunos)) data.alunos = [];
   if (!Array.isArray(data.avaliacoes)) data.avaliacoes = [];
+  if (!Array.isArray(data.mensagensAluno)) { data.mensagensAluno = []; changed = true; }
 
   const professores = data.users.filter(u => u.papel === 'professor');
   function acharProfessorPorNome(nome) {
@@ -3227,7 +3231,7 @@ function logAction(descricao) {
 /* ---------- Notificações ----------
    Avisos por usuário (ex.: "você foi adicionado como supervisor
    compartilhado de uma ficha"). Exibidas no sino do topbar. */
-function notificacoes_create(userId, mensagem, avaliacaoId) {
+function notificacoes_create(userId, mensagem, avaliacaoId, destino) {
   if (!userId) return;
   const db = db_load();
   db.notificacoes = db.notificacoes || [];
@@ -3236,6 +3240,7 @@ function notificacoes_create(userId, mensagem, avaliacaoId) {
     userId,
     mensagem,
     avaliacaoId: avaliacaoId || null,
+    destino: destino || null,
     lida: false,
     criadoEm: new Date().toISOString()
   });
@@ -3264,6 +3269,72 @@ function notificacoes_markAllRead(userId) {
   const db = db_load();
   (db.notificacoes || []).forEach(n => { if (n.userId === userId) n.lida = true; });
   db_save(db);
+}
+
+/* ---------- Mensagens de professores para alunos ----------
+   Feed de feedback: professor (ou admin) escreve, aluno só lê. Fica
+   salvo no histórico permanente do aluno — quantas mensagens quiser,
+   de quantos professores diferentes. */
+function mensagensAluno_list(alunoId) {
+  const db = db_load();
+  return (db.mensagensAluno || [])
+    .filter(m => m.alunoId === alunoId)
+    .sort((a, b) => new Date(a.criadoEm) - new Date(b.criadoEm));
+}
+
+function mensagensAluno_create(alunoId, texto) {
+  const db = db_load();
+  const aluno = (db.alunos || []).find(a => a.id === alunoId);
+  if (!aluno) return { ok: false, msg: 'Aluno(a) não encontrado(a).' };
+  const txt = (texto || '').trim();
+  if (!txt) return { ok: false, msg: 'Escreva uma mensagem antes de enviar.' };
+  const session = session_get();
+  const nova = {
+    id: uid('msgaluno'),
+    alunoId,
+    autorId: session ? session.id : null,
+    autorNome: session ? session.nome : 'Sistema',
+    texto: txt,
+    criadoEm: new Date().toISOString(),
+    lida: false
+  };
+  db.mensagensAluno = db.mensagensAluno || [];
+  db.mensagensAluno.push(nova);
+  db_save(db);
+  notificacoes_create(alunoId, `Nova mensagem de ${nova.autorNome}`, null, 'minhasMensagens');
+  logAction(`Mensagem enviada para ${aluno.nome}`);
+  return { ok: true, mensagem: nova };
+}
+
+function mensagensAluno_delete(id) {
+  const db = db_load();
+  const idx = (db.mensagensAluno || []).findIndex(m => m.id === id);
+  if (idx === -1) return { ok: false, msg: 'Mensagem não encontrada.' };
+  db.mensagensAluno.splice(idx, 1);
+  _registrarRemocao(db, 'mensagensAluno', id);
+  db_save(db);
+  return { ok: true };
+}
+
+function mensagensAluno_marcarLidas(alunoId) {
+  const db = db_load();
+  let mudou = false;
+  (db.mensagensAluno || []).forEach(m => {
+    if (m.alunoId === alunoId && !m.lida) { m.lida = true; mudou = true; }
+  });
+  if (mudou) db_save(db);
+}
+
+function mensagensAluno_naoLidasCount(alunoId) {
+  const db = db_load();
+  return (db.mensagensAluno || []).filter(m => m.alunoId === alunoId && !m.lida).length;
+}
+
+/* Última mensagem de cada aluno — usado pra ordenar/mostrar prévia
+   na lista de conversas do professor. */
+function mensagensAluno_ultima(alunoId) {
+  const lista = mensagensAluno_list(alunoId);
+  return lista.length ? lista[lista.length - 1] : null;
 }
 
 /* ---------- Sessão ---------- */
@@ -10413,7 +10484,9 @@ function pode(acao) {
     aluno:          { title: 'Meu Desempenho',         sub: 'Suas fichas de avaliação e evolução nas práticas supervisionadas' },
     fichasClinicas: { title: 'Fichas', sub: 'Cadastre pacientes e lance quantas fichas quiser para cada um' },
     fichasClinicasEquipe: { title: 'Fichas', sub: 'Fichas integradas pelos alunos, organizadas por matéria e por aluno' },
-    fichaModelos: { title: 'Cadastrar ficha', sub: 'Crie modelos de ficha (tópicos e subtópicos) e vincule a matérias' }
+    fichaModelos: { title: 'Cadastrar ficha', sub: 'Crie modelos de ficha (tópicos e subtópicos) e vincule a matérias' },
+    mensagensAlunos: { title: 'Mensagens aos alunos', sub: 'Envie feedback e comentários para os alunos matriculados no semestre' },
+    minhasMensagens: { title: 'Mensagens', sub: 'Feedback e comentários enviados pelos professores' }
   };
 
   function applyRolePermissions() {
@@ -10424,7 +10497,7 @@ function pode(acao) {
     if (s.papel === 'aluno') {
       $all('.nav-item').forEach(btn => {
         const view = btn.dataset.view;
-        btn.style.display = (view === 'aluno' || view === 'fichasClinicas') ? '' : 'none';
+        btn.style.display = (view === 'aluno' || view === 'fichasClinicas' || view === 'minhasMensagens') ? '' : 'none';
       });
       $all('.nav-section-label').forEach(l => l.style.display = 'none');
       const alunoSec = $('#nav-section-aluno');
@@ -10437,11 +10510,11 @@ function pode(acao) {
 
     // Demais papéis — sempre ocultar os itens exclusivos do aluno
     const adminOnlyViews = ['usuarios', 'auditoria'];
-    const profPlusViews  = ['configuracoes', 'turmas', 'fichaModelos'];
+    const profPlusViews  = ['configuracoes', 'turmas', 'fichaModelos', 'mensagensAlunos'];
 
     $all('.nav-item').forEach(btn => {
       const view = btn.dataset.view;
-      if (view === 'aluno' || view === 'fichasClinicas') { btn.style.display = 'none'; return; }
+      if (view === 'aluno' || view === 'fichasClinicas' || view === 'minhasMensagens') { btn.style.display = 'none'; return; }
       if (adminOnlyViews.includes(view) && s.papel !== 'admin') {
         btn.style.display = 'none';
       } else if (profPlusViews.includes(view) && !['admin', 'professor'].includes(s.papel)) {
@@ -10470,13 +10543,24 @@ function pode(acao) {
   function refreshNotifBadge() {
     const s = session_get();
     const badge = $('#notifBadge');
-    if (!s || !badge) return;
-    const count = notificacoes_unreadCount(s.id);
-    if (count > 0) {
-      badge.textContent = count > 99 ? '99+' : String(count);
-      badge.classList.remove('hidden');
-    } else {
-      badge.classList.add('hidden');
+    if (s && badge) {
+      const count = notificacoes_unreadCount(s.id);
+      if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.classList.remove('hidden');
+      } else {
+        badge.classList.add('hidden');
+      }
+    }
+    const msgBadge = $('#msgAlunoBadge');
+    if (s && s.papel === 'aluno' && msgBadge) {
+      const naoLidas = (typeof mensagensAluno_naoLidasCount === 'function') ? mensagensAluno_naoLidasCount(s.id) : 0;
+      if (naoLidas > 0) {
+        msgBadge.textContent = naoLidas > 99 ? '99+' : String(naoLidas);
+        msgBadge.classList.remove('hidden');
+      } else {
+        msgBadge.classList.add('hidden');
+      }
     }
   }
 
@@ -10491,7 +10575,7 @@ function pode(acao) {
       return;
     }
     listEl.innerHTML = '<div class="notif-list-body">' + lista.map(n => `
-      <div class="notif-item ${n.lida ? '' : 'unread'}" data-id="${n.id}" data-aval="${n.avaliacaoId || ''}">
+      <div class="notif-item ${n.lida ? '' : 'unread'}" data-id="${n.id}" data-aval="${n.avaliacaoId || ''}" data-destino="${n.destino || ''}">
         <span class="notif-dot ${n.lida ? 'read' : ''}"></span>
         <div>
           <div>${escapeHtml(n.mensagem)}</div>
@@ -10504,11 +10588,14 @@ function pode(acao) {
       item.addEventListener('click', () => {
         const id = item.dataset.id;
         const avalId = item.dataset.aval;
+        const destino = item.dataset.destino;
         notificacoes_markRead(id);
         refreshNotifBadge();
         paintNotifList();
-        if (avalId) {
-          closeNotifPanel();
+        closeNotifPanel();
+        if (destino) {
+          navigateTo(destino);
+        } else if (avalId) {
           const _ns = session_get();
           if (_ns && _ns.papel === 'aluno') {
             navigateTo('aluno', { avalId });
@@ -12736,6 +12823,279 @@ function pode(acao) {
   }
 
   window.AvaliaClinViews.fichaModelos = renderFichaModelosView;
+})();
+</script>
+
+<script>
+/* ============================================================
+   Avalix — Mensagens aos alunos (admin/professor)
+   Feedback e comentários para os alunos matriculados no semestre
+   selecionado, com histórico completo por aluno(a).
+   ============================================================ */
+(function () {
+  'use strict';
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $all(sel, root) { return Array.from((root || document).querySelectorAll(sel)); }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function initials(nome) {
+    return String(nome || '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  }
+
+  function fmtDataHora(iso) {
+    try { return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return iso; }
+  }
+
+  function buildConfirmModal({ title, message, confirmLabel, danger, onConfirm }) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:420px;">
+        <div class="modal-head">
+          <h3>${escapeHtml(title)}</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <p style="margin:0;color:var(--ac-charcoal-soft);">${message}</p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="confirm">${escapeHtml(confirmLabel || 'Confirmar')}</button>
+        </div>
+      </div>
+    `;
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => { onConfirm(); close(); });
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    return overlay;
+  }
+
+  let alunoSelecionadoId = null;
+  let buscaAtual = '';
+
+  function renderMensagensAlunosView(container) {
+    alunoSelecionadoId = null;
+    buscaAtual = '';
+    const alunos = alunos_doSemestreAtual().slice().sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+
+    container.innerHTML = `
+      <div style="display:grid;grid-template-columns:320px 1fr;gap:1.25rem;align-items:start;">
+        <div class="card" style="padding:1rem;">
+          <div class="input-icon-wrap" style="margin-bottom:.75rem;">
+            <i class="ti ti-search"></i>
+            <input type="text" id="msgBuscaAluno" placeholder="Buscar aluno(a)" aria-label="Buscar aluno(a)">
+          </div>
+          <div id="msgListaAlunos" style="display:flex;flex-direction:column;gap:2px;max-height:65vh;overflow-y:auto;"></div>
+          ${!alunos.length ? '<div style="padding:1rem;color:var(--ac-charcoal-soft);font-size:13px;">Nenhum aluno matriculado neste semestre.</div>' : ''}
+        </div>
+        <div class="card card-pad" id="msgPainelChat" style="min-height:65vh;display:flex;flex-direction:column;"></div>
+      </div>
+    `;
+
+    function paintListaAlunos() {
+      const termo = buscaAtual.trim().toLowerCase();
+      const filtrados = termo
+        ? alunos.filter(a => a.nome.toLowerCase().includes(termo) || (a.matricula || '').toLowerCase().includes(termo))
+        : alunos;
+      const listaEl = $('#msgListaAlunos', container);
+      if (!listaEl) return;
+      if (!filtrados.length) {
+        listaEl.innerHTML = '<div style="padding:1rem;color:var(--ac-charcoal-soft);font-size:13px;">Nenhum aluno encontrado.</div>';
+        return;
+      }
+      listaEl.innerHTML = filtrados.map(a => {
+        const ultima = mensagensAluno_ultima(a.id);
+        const ativo = a.id === alunoSelecionadoId;
+        return `
+          <button type="button" class="msg-aluno-item" data-id="${a.id}" style="display:flex;align-items:center;gap:10px;padding:.6rem .5rem;border-radius:8px;border:none;background:${ativo ? 'var(--ac-sand-dark)' : 'transparent'};text-align:left;cursor:pointer;width:100%;">
+            <div class="avatar" style="width:34px;height:34px;font-size:12px;flex-shrink:0;">${initials(a.nome)}</div>
+            <div style="min-width:0;flex:1;">
+              <div style="font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(a.nome)}</div>
+              <div style="font-size:12px;color:var(--ac-charcoal-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ultima ? escapeHtml(ultima.texto) : 'Sem mensagens ainda'}</div>
+            </div>
+          </button>
+        `;
+      }).join('');
+      $all('.msg-aluno-item', listaEl).forEach(btn => {
+        btn.addEventListener('click', () => {
+          alunoSelecionadoId = btn.dataset.id;
+          paintListaAlunos();
+          paintChat();
+        });
+      });
+    }
+
+    function paintChat() {
+      const painel = $('#msgPainelChat', container);
+      if (!painel) return;
+      if (!alunoSelecionadoId) {
+        painel.innerHTML = `
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--ac-charcoal-soft);text-align:center;padding:2rem;">
+            <i class="ti ti-message-2" style="font-size:36px;opacity:.4;margin-bottom:.5rem;"></i>
+            <div>Selecione um(a) aluno(a) à esquerda para ver o histórico e enviar uma mensagem.</div>
+          </div>
+        `;
+        return;
+      }
+      const aluno = alunos_get(alunoSelecionadoId);
+      if (!aluno) { alunoSelecionadoId = null; paintChat(); return; }
+      const historico = mensagensAluno_list(alunoSelecionadoId);
+
+      painel.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding-bottom:.85rem;border-bottom:1px solid var(--ac-line);margin-bottom:.85rem;">
+          <div class="avatar" style="width:38px;height:38px;font-size:13px;">${initials(aluno.nome)}</div>
+          <div>
+            <div style="font-weight:600;">${escapeHtml(aluno.nome)}</div>
+            <div style="font-size:12px;color:var(--ac-charcoal-soft);">${escapeHtml(aluno.matricula || '—')} · ${escapeHtml(aluno_turmaNome(aluno))}</div>
+          </div>
+        </div>
+        <div id="msgHistorico" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:.25rem 2px;">
+          ${historico.length ? historico.map(m => `
+            <div class="msg-bubble" data-id="${m.id}" style="align-self:flex-start;max-width:80%;background:var(--ac-sand-dark);border-radius:12px;padding:.6rem .85rem;">
+              <div style="font-size:12px;font-weight:600;color:var(--ac-terracotta-dark);margin-bottom:2px;">${escapeHtml(m.autorNome)}</div>
+              <div style="white-space:pre-wrap;font-size:14px;">${escapeHtml(m.texto)}</div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px;gap:8px;">
+                <span style="font-size:11px;color:var(--ac-charcoal-soft);">${fmtDataHora(m.criadoEm)}${m.lida ? ' · lida' : ''}</span>
+                <button type="button" class="msg-del-btn" data-id="${m.id}" title="Excluir mensagem" aria-label="Excluir mensagem" style="background:none;border:none;color:var(--ac-charcoal-soft);cursor:pointer;padding:2px;">
+                  <i class="ti ti-trash" style="font-size:14px;"></i>
+                </button>
+              </div>
+            </div>
+          `).join('') : '<div style="color:var(--ac-charcoal-soft);font-size:13px;text-align:center;margin-top:2rem;">Nenhuma mensagem enviada ainda.</div>'}
+        </div>
+        <form id="msgForm" style="display:flex;gap:8px;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--ac-line);">
+          <textarea id="msgTexto" rows="2" placeholder="Escreva um feedback ou comentário para ${escapeHtml((aluno.nome || '').split(' ')[0] || 'o(a) aluno(a)')}..." style="flex:1;resize:vertical;border-radius:8px;border:1px solid var(--ac-line-strong);padding:.6rem .75rem;font-family:inherit;font-size:14px;" required></textarea>
+          <button type="submit" class="btn btn-accent" style="align-self:flex-end;"><i class="ti ti-send"></i> Enviar</button>
+        </form>
+      `;
+
+      const histEl = $('#msgHistorico', painel);
+      if (histEl) histEl.scrollTop = histEl.scrollHeight;
+
+      $all('.msg-del-btn', painel).forEach(btn => {
+        btn.addEventListener('click', () => {
+          const box = buildConfirmModal({
+            title: 'Excluir mensagem',
+            message: 'Tem certeza que deseja excluir esta mensagem? Essa ação não pode ser desfeita.',
+            confirmLabel: 'Excluir',
+            danger: true,
+            onConfirm: () => {
+              const r = mensagensAluno_delete(btn.dataset.id);
+              if (r.ok) { showToast('Mensagem excluída.', 'success'); paintChat(); paintListaAlunos(); }
+              else showToast(r.msg, 'danger');
+            }
+          });
+          document.body.appendChild(box);
+        });
+      });
+
+      $('#msgForm', painel).addEventListener('submit', (e) => {
+        e.preventDefault();
+        const textarea = $('#msgTexto', painel);
+        const texto = textarea.value;
+        const r = mensagensAluno_create(alunoSelecionadoId, texto);
+        if (r.ok) {
+          textarea.value = '';
+          paintChat();
+          paintListaAlunos();
+          showToast('Mensagem enviada.', 'success');
+        } else {
+          showToast(r.msg, 'danger');
+        }
+      });
+    }
+
+    $('#msgBuscaAluno', container).addEventListener('input', function () {
+      buscaAtual = this.value;
+      paintListaAlunos();
+    });
+
+    paintListaAlunos();
+    paintChat();
+  }
+
+  window.AvaliaClinViews = window.AvaliaClinViews || {};
+  window.AvaliaClinViews.mensagensAlunos = renderMensagensAlunosView;
+})();
+</script>
+
+<script>
+/* ============================================================
+   Avalix — Minhas Mensagens (aluno)
+   Feed somente-leitura com o feedback enviado pelos professores.
+   ============================================================ */
+(function () {
+  'use strict';
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function initials(nome) {
+    return String(nome || '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  }
+
+  function fmtDataHora(iso) {
+    try { return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return iso; }
+  }
+
+  function renderMinhasMensagensView(container) {
+    const session = session_get();
+    if (!session || session.papel !== 'aluno') {
+      container.innerHTML = '<div class="card card-pad">Acesso restrito a alunos.</div>';
+      return;
+    }
+    const alunoId = session.alunoId || session.id;
+    const historico = mensagensAluno_list(alunoId);
+
+    container.innerHTML = `
+      <div class="card card-pad">
+        <div class="eyebrow" style="margin-bottom:8px;">Feedback dos professores</div>
+        ${historico.length ? `
+          <div style="display:flex;flex-direction:column;gap:14px;max-width:720px;">
+            ${historico.slice().reverse().map(m => `
+              <div style="display:flex;gap:12px;align-items:flex-start;">
+                <div class="avatar" style="width:36px;height:36px;font-size:12px;flex-shrink:0;">${initials(m.autorNome)}</div>
+                <div style="background:var(--ac-sand-dark);border-radius:12px;padding:.75rem 1rem;flex:1;">
+                  <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:4px;">
+                    <span style="font-weight:600;font-size:13.5px;color:var(--ac-terracotta-dark);">${escapeHtml(m.autorNome)}</span>
+                    <span style="font-size:12px;color:var(--ac-charcoal-soft);">${fmtDataHora(m.criadoEm)}</span>
+                  </div>
+                  <div style="white-space:pre-wrap;font-size:14.5px;">${escapeHtml(m.texto)}</div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        ` : `
+          <div style="text-align:center;color:var(--ac-charcoal-soft);padding:2.5rem 1rem;">
+            <i class="ti ti-message-2" style="font-size:36px;opacity:.4;display:block;margin-bottom:.5rem;"></i>
+            Nenhuma mensagem dos professores ainda.
+          </div>
+        `}
+      </div>
+    `;
+
+    // Marca como lidas ao abrir a tela e atualiza o sininho/badge do menu
+    mensagensAluno_marcarLidas(alunoId);
+    try { if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge(); } catch (e) {}
+  }
+
+  window.AvaliaClinViews = window.AvaliaClinViews || {};
+  window.AvaliaClinViews.minhasMensagens = renderMinhasMensagensView;
 })();
 </script>
 
