@@ -10631,6 +10631,14 @@ function pode(acao) {
       setTimeout(function() { try { _supaPull(); } catch(e) {} }, 500);
       /* Polling: verificar novidades a cada 5s */
       setTimeout(function() { try { _supaStartPolling(); } catch(e) {} }, 5000);
+      /* Se a conexão cair durante uma edição, o envio falha e só seria
+         tentado de novo na próxima alteração ou próxima vez que a
+         página abrir. Isso aqui fecha essa lacuna: assim que a rede
+         voltar (o navegador avisa sozinho), tenta enviar/mesclar de
+         novo automaticamente, sem esperar nenhuma ação da pessoa. */
+      window.addEventListener('online', function () {
+        try { _supaSchedule(); } catch (e) {}
+      });
     });
   });
 
