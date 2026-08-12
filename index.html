@@ -2871,6 +2871,166 @@ function db_migrate(data) {
 
     data.version = 24; changed = true;
   }
+
+  // v25 — limpeza das duplicidades geradas pelo mesmo bug do seed que
+  // a v23/v24 já tinham começado a corrigir (um aparelho "zerado"
+  // gerando semestre/turmas/matérias/modelos de ficha/cenários/admin
+  // de exemplo, que se juntavam aos de verdade em vez de ser
+  // descartados — a raiz já foi fechada em _supaBootstrap, isso aqui
+  // arruma quem já ficou com o banco cheio de cópias). Agrupa cada
+  // tipo por um "nome natural" (rótulo, nome, título, e-mail); quando
+  // há mais de um no mesmo grupo, mantém o que tem mais uso real e
+  // REATRIBUI qualquer vínculo que apontava pros outros antes de
+  // removê-los — nenhum aluno, nota, ficha ou vínculo é perdido, só
+  // para de existir a cópia vazia.
+  if (data.version < 25) {
+    const sessaoAtual = (typeof session_get === 'function') ? session_get() : null;
+
+    function dedupPorChave(lista, chaveDe, pontuar, reatribuir) {
+      const grupos = {};
+      (lista || []).forEach(item => {
+        const chave = chaveDe(item);
+        if (chave == null || chave === '') return;
+        (grupos[chave] = grupos[chave] || []).push(item);
+      });
+      const idsRemover = {};
+      Object.keys(grupos).forEach(chave => {
+        const grupo = grupos[chave];
+        if (grupo.length < 2) return;
+        grupo.sort((a, b) => pontuar(b) - pontuar(a));
+        const sobrevivente = grupo[0];
+        grupo.slice(1).forEach(perdedor => {
+          reatribuir && reatribuir(perdedor, sobrevivente);
+          idsRemover[perdedor.id] = true;
+        });
+      });
+      return (lista || []).filter(item => !idsRemover[item.id]);
+    }
+
+    const materiasArr = (data.config && data.config.materias) || [];
+    const cenariosArr = (data.config && data.config.cenarios) || [];
+
+    // 1) Semestres (por rótulo) — quem tem mais alunos matriculados
+    //    de verdade vence; matérias e alunos apontando pro perdedor
+    //    são realinhados pro sobrevivente.
+    data.semestres = dedupPorChave(
+      data.semestres,
+      s => (s.label || '').trim(),
+      s => (data.alunos || []).filter(a => (a.semestresIds || []).includes(s.id)).length * 10
+         + materiasArr.filter(m => m.semestreId === s.id).length,
+      (perdedor, sobrevivente) => {
+        materiasArr.forEach(m => { if (m.semestreId === perdedor.id) m.semestreId = sobrevivente.id; });
+        (data.alunos || []).forEach(a => {
+          if (!Array.isArray(a.semestresIds) || !a.semestresIds.includes(perdedor.id)) return;
+          a.semestresIds = a.semestresIds.filter(id => id !== perdedor.id);
+          if (!a.semestresIds.includes(sobrevivente.id)) a.semestresIds.push(sobrevivente.id);
+        });
+        if (perdedor.status === 'ativo') sobrevivente.status = 'ativo';
+      }
+    );
+
+    // 2) Matérias (por nome + semestre já corrigido acima) — funde
+    //    listas de alunos/supervisores em vez de escolher uma só.
+    const materiasDeduped = dedupPorChave(
+      materiasArr,
+      m => (m.nome || '').trim() + '::' + m.semestreId,
+      m => (m.alunos || []).length * 10 + (m.supervisores || []).length + (m.cenarios || []).length,
+      (perdedor, sobrevivente) => {
+        sobrevivente.alunos = Array.from(new Set((sobrevivente.alunos || []).concat(perdedor.alunos || [])));
+        sobrevivente.supervisores = Array.from(new Set((sobrevivente.supervisores || []).concat(perdedor.supervisores || [])));
+        (data.fichaModelos || []).forEach(fm => {
+          if (!Array.isArray(fm.materiasIds) || !fm.materiasIds.includes(perdedor.id)) return;
+          fm.materiasIds = fm.materiasIds.filter(id => id !== perdedor.id);
+          if (!fm.materiasIds.includes(sobrevivente.id)) fm.materiasIds.push(sobrevivente.id);
+        });
+      }
+    );
+    if (data.config) data.config.materias = materiasDeduped;
+
+    // 3) Turmas (por nome) — quem tem mais alunos vinculados vence;
+    //    alunos do perdedor são realinhados.
+    data.turmas = dedupPorChave(
+      data.turmas,
+      t => (t.nome || '').trim(),
+      t => (data.alunos || []).filter(a => a.turmaId === t.id).length,
+      (perdedor, sobrevivente) => {
+        (data.alunos || []).forEach(a => { if (a.turmaId === perdedor.id) a.turmaId = sobrevivente.id; });
+      }
+    );
+
+    // 4) Modelos de ficha (por título) — funde as matérias vinculadas
+    //    e realinha fichas já preenchidas que apontavam pro perdedor.
+    data.fichaModelos = dedupPorChave(
+      data.fichaModelos,
+      fm => (fm.titulo || '').trim(),
+      fm => (fm.materiasIds || []).length * 10 + (data.fichasClinicas || []).filter(f => f.modeloId === fm.id).length,
+      (perdedor, sobrevivente) => {
+        sobrevivente.materiasIds = Array.from(new Set((sobrevivente.materiasIds || []).concat(perdedor.materiasIds || [])));
+        (data.fichasClinicas || []).forEach(f => { if (f.modeloId === perdedor.id) f.modeloId = sobrevivente.id; });
+      }
+    );
+
+    // 5) Cenários (por nome) — realinha avaliações e os pesos dentro
+    //    de cada matéria que referenciavam o perdedor.
+    const cenariosDeduped = dedupPorChave(
+      cenariosArr,
+      c => (c.nome || '').trim(),
+      c => (data.avaliacoes || []).filter(av => av.cenarioId === c.id).length,
+      (perdedor, sobrevivente) => {
+        (data.avaliacoes || []).forEach(av => { if (av.cenarioId === perdedor.id) av.cenarioId = sobrevivente.id; });
+        materiasDeduped.forEach(m => {
+          if (!Array.isArray(m.cenarios)) return;
+          const jaTemSobrevivente = m.cenarios.some(mc => mc.cenarioId === sobrevivente.id);
+          m.cenarios = m.cenarios
+            .filter(mc => mc.cenarioId !== perdedor.id || !jaTemSobrevivente)
+            .map(mc => mc.cenarioId === perdedor.id ? Object.assign({}, mc, { cenarioId: sobrevivente.id }) : mc);
+        });
+      }
+    );
+    if (data.config) data.config.cenarios = cenariosDeduped;
+
+    // 6) Usuários (por e-mail) — prefere quem já teve a senha trocada
+    //    (sinal de que é a conta realmente em uso) e nunca remove o
+    //    id da sessão atualmente logada. Reatribui todo vínculo
+    //    (supervisor de aluno/matéria/avaliação, autor de modelo)
+    //    antes de remover o perdedor.
+    data.users = dedupPorChave(
+      data.users,
+      u => (u.email || '').toLowerCase().trim(),
+      u => {
+        if (sessaoAtual && u.id === sessaoAtual.id) return Infinity;
+        const senhaPropria = u.senha && u.senha !== 'Helois@111329' ? 1e12 : 0;
+        return senhaPropria - new Date(u.criadoEm || 0).getTime();
+      },
+      (perdedor, sobrevivente) => {
+        (data.alunos || []).forEach(a => { if (a.supervisorPadraoId === perdedor.id) a.supervisorPadraoId = sobrevivente.id; });
+        materiasDeduped.forEach(m => {
+          if (!Array.isArray(m.supervisores) || !m.supervisores.includes(perdedor.id)) return;
+          m.supervisores = m.supervisores.filter(id => id !== perdedor.id);
+          if (!m.supervisores.includes(sobrevivente.id)) m.supervisores.push(sobrevivente.id);
+        });
+        (data.fichaModelos || []).forEach(fm => {
+          if (fm.criadoPorId === perdedor.id) fm.criadoPorId = sobrevivente.id;
+          if (Array.isArray(fm.professoresIds) && fm.professoresIds.includes(perdedor.id)) {
+            fm.professoresIds = fm.professoresIds.filter(id => id !== perdedor.id);
+            if (!fm.professoresIds.includes(sobrevivente.id)) fm.professoresIds.push(sobrevivente.id);
+          }
+        });
+        (data.avaliacoes || []).forEach(av => {
+          if (av.supervisorPrincipalId === perdedor.id) av.supervisorPrincipalId = sobrevivente.id;
+          if (Array.isArray(av.supervisoresCompartilhadosIds) && av.supervisoresCompartilhadosIds.includes(perdedor.id)) {
+            av.supervisoresCompartilhadosIds = av.supervisoresCompartilhadosIds.filter(id => id !== perdedor.id);
+            if (!av.supervisoresCompartilhadosIds.includes(sobrevivente.id) && sobrevivente.id !== av.supervisorPrincipalId) {
+              av.supervisoresCompartilhadosIds.push(sobrevivente.id);
+            }
+          }
+        });
+        if (perdedor.ativo && !sobrevivente.ativo) sobrevivente.ativo = true;
+      }
+    );
+
+    data.version = 25; changed = true;
+  }
   return changed;
 }
 
