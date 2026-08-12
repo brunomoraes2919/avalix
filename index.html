@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Evita que o navegador guarde uma cópia antiga desta página em
+     cache — sem isso, publicar uma correção no GitHub não é
+     suficiente: quem já tinha aberto o site antes podia continuar
+     vendo o HTML/JS velho por dias, achando que a correção não
+     "pegou". -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Avalix — Plataforma de Gestão Acadêmica Supervisionada</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1517,6 +1525,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <button class="btn btn-ghost btn-block btn-sm" id="logoutBtn" style="margin-top:10px;color:var(--ac-sand);border-color:rgba(246,243,236,0.25);">
         <i class="ti ti-logout"></i> Sair
       </button>
+      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-12 · v26</div>
     </div>
   </aside>
 
