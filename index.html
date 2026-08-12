@@ -1676,6 +1676,40 @@ function _supaMergeDados(local, remoto, prioridade) {
   return m;
 }
 
+/* Roda 1x no boot, ANTES de tudo. Se este navegador nunca guardou
+   dados (localStorage vazio — celular novo, cache limpo, modo
+   anônimo), busca no Supabase ANTES de inventar um banco de exemplo
+   do zero (db_load faria isso sozinho, na hora, se deixado agir
+   primeiro). Sem essa checagem, um aparelho "zerado" gerava semestre,
+   turmas e modelos de ficha novos — com ids novos a cada vez — que
+   depois se juntavam aos de verdade em vez de substituí-los,
+   causando duplicidade; e, pior, o semestre de exemplo (sem nenhum
+   aluno matriculado) podia acabar sendo escolhido como "o" semestre
+   atual, escondendo os alunos reais da lista. Tempo limite de 6s: se
+   a rede estiver ruim, segue o comportamento antigo (cria um banco de
+   exemplo local) em vez de travar a abertura do app. */
+function _supaBootstrap() {
+  return new Promise(function (resolve) {
+    var raw;
+    try { raw = localStorage.getItem(DB_KEY); } catch (e) { raw = null; }
+    if (raw) { resolve(); return; }
+
+    var acabou = false;
+    var terminar = function () { if (!acabou) { acabou = true; resolve(); } };
+    setTimeout(terminar, 6000);
+
+    _supaFetchDadosRemotos().then(function (row) {
+      if (row && row.dados) {
+        try {
+          localStorage.setItem(DB_KEY, JSON.stringify(row.dados));
+          _supaLastTs = row.atualizado_em;
+        } catch (e) {}
+      }
+      terminar();
+    }).catch(terminar);
+  });
+}
+
 /* Puxa dados do Supabase → localStorage, mesclando com o que já
    existe localmente. Chamado 1x no boot. */
 function _supaPull() {
@@ -2788,6 +2822,54 @@ function db_migrate(data) {
       aluno.semestresIds = Array.from(ids);
     });
     data.version = 23; changed = true;
+  }
+
+  // v24 — corrige dois efeitos colaterais possíveis de um aparelho
+  // "zerado" (celular novo, cache limpo) ter gerado um semestre/turmas
+  // /modelos de ficha/usuário de exemplo com ids novos, que se juntou
+  // aos dados reais em vez de ser descartado (corrigido na raiz — ver
+  // _supaBootstrap — mas isso arruma quem já ficou com o banco nesse
+  // estado):
+  //  1) Mais de um semestre marcado "ativo" ao mesmo tempo fazia
+  //     `ativos[0]` escolher às vezes o semestre de exemplo (sem
+  //     nenhum aluno matriculado) como "o" semestre atual — e por
+  //     tudo ser filtrado pelo semestre atual, os alunos de verdade
+  //     pareciam ter sumido. Mantém ativo só o semestre com mais
+  //     alunos matriculados; os outros passam a "inativo" (ninguém é
+  //     apagado, dá pra reabrir depois se for engano).
+  //  2) Usuários duplicados com o mesmo e-mail (o admin de exemplo
+  //     tem sempre o mesmo e-mail do admin real) — mantém o mais
+  //     antigo ativo e desativa o(s) mais novo(s), sem apagar (evita
+  //     quebrar qualquer coisa que ainda referencie o id antigo).
+  if (data.version < 24) {
+    const semestresAtivos = (data.semestres || []).filter(s => s.status === 'ativo');
+    if (semestresAtivos.length > 1) {
+      const contagem = {};
+      (data.alunos || []).forEach(a => {
+        (a.semestresIds || []).forEach(sid => { contagem[sid] = (contagem[sid] || 0) + 1; });
+      });
+      semestresAtivos.sort((a, b) => (contagem[b.id] || 0) - (contagem[a.id] || 0));
+      semestresAtivos.slice(1).forEach(s => { s.status = 'inativo'; });
+    }
+
+    const porEmail = {};
+    (data.users || []).forEach(u => {
+      const chave = (u.email || '').toLowerCase().trim();
+      if (!chave) return;
+      if (!porEmail[chave]) porEmail[chave] = [];
+      porEmail[chave].push(u);
+    });
+    Object.keys(porEmail).forEach(chave => {
+      const grupo = porEmail[chave];
+      if (grupo.length < 2) return;
+      grupo.sort((a, b) => new Date(a.criadoEm || 0) - new Date(b.criadoEm || 0));
+      grupo.slice(1).forEach(dup => {
+        dup.ativo = false;
+        if (!/\(duplicado\)$/.test(dup.nome || '')) dup.nome = (dup.nome || 'Usuário') + ' (duplicado)';
+      });
+    });
+
+    data.version = 24; changed = true;
   }
   return changed;
 }
@@ -10291,6 +10373,49 @@ function pode(acao) {
   }
 
   /* ---------- Foto de perfil (aluno e equipe, self-service) ---------- */
+
+  /* Redimensiona e comprime a foto no navegador antes de salvar. Sem
+     isso, cada foto (até 2 MB do arquivo original, ~2.7 MB depois de
+     virar base64) entraria inteira dentro do mesmo "documento"
+     compartilhado com o resto do banco — bastariam poucas fotos pra
+     esbarrar no limite de localStorage do navegador (5-10 MB, típico)
+     ou deixar toda sincronização mais lenta pra todo mundo. Isso
+     reduz uma foto típica pra poucas dezenas de KB. */
+  function _redimensionarFotoPerfil(file, ladoMaximoPx, qualidade) {
+    return new Promise(function (resolve, reject) {
+      const leitor = new FileReader();
+      leitor.onerror = function () { reject(new Error('Falha ao ler o arquivo.')); };
+      leitor.onload = function (ev) {
+        const img = new Image();
+        img.onerror = function () { reject(new Error('Arquivo de imagem inválido.')); };
+        img.onload = function () {
+          let largura = img.naturalWidth || img.width;
+          let altura = img.naturalHeight || img.height;
+          if (!largura || !altura) { reject(new Error('Não foi possível ler as dimensões da imagem.')); return; }
+          const maiorLado = Math.max(largura, altura);
+          if (maiorLado > ladoMaximoPx) {
+            const escala = ladoMaximoPx / maiorLado;
+            largura = Math.max(1, Math.round(largura * escala));
+            altura = Math.max(1, Math.round(altura * escala));
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = largura;
+          canvas.height = altura;
+          const ctx = canvas.getContext('2d');
+          /* fundo branco: a saída é JPEG (sem transparência), então um
+             PNG/GIF com fundo transparente ficaria preto sem isso */
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, largura, altura);
+          ctx.drawImage(img, 0, 0, largura, altura);
+          try { resolve(canvas.toDataURL('image/jpeg', qualidade)); }
+          catch (e) { reject(e); }
+        };
+        img.src = ev.target.result;
+      };
+      leitor.readAsDataURL(file);
+    });
+  }
+
   function abrirModalFotoPerfil() {
     const s = session_get();
     if (!s) return;
@@ -10323,7 +10448,7 @@ function pode(acao) {
               <i class="ti ti-trash"></i> Remover
             </button>
           </div>
-          <div class="field-hint" style="margin-top:.6rem;">Opcional. PNG, JPEG, WEBP ou GIF, até 2 MB.</div>
+          <div class="field-hint" style="margin-top:.6rem;">Opcional. PNG, JPEG, WEBP ou GIF, até 2 MB — redimensionamos e comprimimos automaticamente antes de salvar.</div>
         </div>
         <div class="modal-foot">
           <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
@@ -10341,14 +10466,14 @@ function pode(acao) {
       const file = this.files[0];
       if (!file) return;
       if (file.size > 2 * 1024 * 1024) { showToast('A foto deve ter menos de 2 MB.', 'danger'); return; }
-      const reader = new FileReader();
-      reader.onload = function (ev) {
-        pendingFoto = ev.target.result;
+      _redimensionarFotoPerfil(file, 480, 0.82).then(function (dataUrlComprimido) {
+        pendingFoto = dataUrlComprimido;
         overlay.querySelector('#foto-perfil-preview-wrap').innerHTML =
           `<img id="foto-perfil-preview-img" src="${pendingFoto}" style="width:100%;height:100%;object-fit:cover;" alt="Foto de perfil">`;
         overlay.querySelector('#btnRemoverFotoPerfil').disabled = false;
-      };
-      reader.readAsDataURL(file);
+      }).catch(function () {
+        showToast('Não foi possível processar essa imagem — tente outro arquivo.', 'danger');
+      });
     });
 
     overlay.querySelector('#btnRemoverFotoPerfil').addEventListener('click', function () {
@@ -10483,23 +10608,30 @@ function pode(acao) {
      INIT
      ============================================================ */
   document.addEventListener('DOMContentLoaded', function () {
-    db_load();
-    refreshLoginStats();
-    initLoginForm();
-    initForgotFlow();
-    initNav();
-    initMobileMenu();
-    initNotifPanel();
-    initSemestreFiltro();
-    initAvatarPerfil();
+    /* Em navegador vazio, _supaBootstrap tenta trazer o banco real do
+       Supabase antes de qualquer coisa — só depois disso é seguro
+       chamar db_load() (que criaria um banco de exemplo do zero se
+       ainda estiver vazio nesse ponto). Em navegador que já tem
+       dados, resolve na hora, sem atraso nenhum. */
+    (typeof _supaBootstrap === 'function' ? _supaBootstrap() : Promise.resolve()).then(function () {
+      db_load();
+      refreshLoginStats();
+      initLoginForm();
+      initForgotFlow();
+      initNav();
+      initMobileMenu();
+      initNotifPanel();
+      initSemestreFiltro();
+      initAvatarPerfil();
 
-    const existing = session_get();
-    if (existing) enterApp();
+      const existing = session_get();
+      if (existing) enterApp();
 
-    /* Sync Supabase em background — nunca bloqueia */
-    setTimeout(function() { try { _supaPull(); } catch(e) {} }, 500);
-    /* Polling: verificar novidades a cada 30s */
-    setTimeout(function() { try { _supaStartPolling(); } catch(e) {} }, 5000);
+      /* Sync Supabase em background — nunca bloqueia */
+      setTimeout(function() { try { _supaPull(); } catch(e) {} }, 500);
+      /* Polling: verificar novidades a cada 5s */
+      setTimeout(function() { try { _supaStartPolling(); } catch(e) {} }, 5000);
+    });
   });
 
 })();
