@@ -1612,8 +1612,12 @@ function _supaFetchDadosRemotos() {
 /* Une duas listas pelo campo "id": tudo que existe só de um lado é
    mantido; no mesmo id dos dois lados, a lista "prioritaria" vence.
    campoOrdenacao (opcional) reordena o resultado (usado em listas
-   tipo log, mais recente primeiro). */
-function _supaMergeListaPorId(base, prioritaria, campoOrdenacao) {
+   tipo log, mais recente primeiro). "removidos" (opcional, um objeto
+   {id: true}) tira da lista final qualquer id que tenha sido excluído
+   de propósito em QUALQUER um dos dois lados — sem isso, mesclar
+   "quem existe só de um lado, mantém" também trazia de volta tudo que
+   tinha sido excluído no outro lado (a raiz de "eu apago e volta"). */
+function _supaMergeListaPorId(base, prioritaria, removidos, campoOrdenacao) {
   var mapa = {};
   (Array.isArray(base) ? base : []).forEach(function (item) {
     if (item && item.id != null) mapa[item.id] = item;
@@ -1621,11 +1625,29 @@ function _supaMergeListaPorId(base, prioritaria, campoOrdenacao) {
   (Array.isArray(prioritaria) ? prioritaria : []).forEach(function (item) {
     if (item && item.id != null) mapa[item.id] = item;
   });
-  var lista = Object.keys(mapa).map(function (k) { return mapa[k]; });
+  var lista = Object.keys(mapa)
+    .filter(function (id) { return !(removidos && removidos[id]); })
+    .map(function (k) { return mapa[k]; });
   if (campoOrdenacao) {
     lista.sort(function (a, b) { return new Date(b[campoOrdenacao] || 0) - new Date(a[campoOrdenacao] || 0); });
   }
   return lista;
+}
+
+/* Tipos de lista que têm exclusão manual pela tela (por isso
+   precisam de lápide). notificações/log/resetTokens não têm exclusão
+   manual, então não precisam. */
+var _SUPA_TIPOS_COM_LAPIDE = ['alunos', 'users', 'avaliacoes', 'fichasClinicas', 'pacientes', 'fichaModelos', 'turmas', 'semestres', 'materias', 'cenarios'];
+
+/* Registra que um id foi excluído de propósito (chamado por toda
+   função "_delete"/"_remover" do app) — assim, mesmo que outro
+   aparelho ainda tenha uma cópia antiga com esse id, a próxima
+   mesclagem sabe que deve descartá-lo em vez de trazê-lo de volta. */
+function _registrarRemocao(data, tipo, id) {
+  if (!id) return;
+  if (!data._removidos) data._removidos = {};
+  if (!Array.isArray(data._removidos[tipo])) data._removidos[tipo] = [];
+  if (data._removidos[tipo].indexOf(id) === -1) data._removidos[tipo].push(id);
 }
 
 /* Vínculos de aluno/professor numa matéria são sempre UNIDOS (nunca
@@ -1648,29 +1670,44 @@ function _supaMergeDados(local, remoto, prioridade) {
   var base = prioridade === 'local' ? remoto : local;
   var prio = prioridade === 'local' ? local : remoto;
 
+  /* Une as lápides dos dois lados — uma exclusão feita em qualquer
+     aparelho vale pros dois, agora e nas próximas mesclagens. */
+  var removidosLocal = local._removidos || {};
+  var removidosRemoto = remoto._removidos || {};
+  var removidosUnidos = {};
+  _SUPA_TIPOS_COM_LAPIDE.forEach(function (tipo) {
+    var setTipo = {};
+    (removidosLocal[tipo] || []).forEach(function (id) { setTipo[id] = true; });
+    (removidosRemoto[tipo] || []).forEach(function (id) { setTipo[id] = true; });
+    removidosUnidos[tipo] = setTipo;
+  });
+
   var m = {};
   m.version = Math.max(local.version || 0, remoto.version || 0);
-  m.alunos = _supaMergeListaPorId(base.alunos, prio.alunos);
-  m.users = _supaMergeListaPorId(base.users, prio.users);
-  m.avaliacoes = _supaMergeListaPorId(base.avaliacoes, prio.avaliacoes);
-  m.fichasClinicas = _supaMergeListaPorId(base.fichasClinicas, prio.fichasClinicas);
-  m.pacientes = _supaMergeListaPorId(base.pacientes, prio.pacientes);
-  m.fichaModelos = _supaMergeListaPorId(base.fichaModelos, prio.fichaModelos);
-  m.turmas = _supaMergeListaPorId(base.turmas, prio.turmas);
-  m.semestres = _supaMergeListaPorId(base.semestres, prio.semestres);
-  m.resetTokens = _supaMergeListaPorId(base.resetTokens, prio.resetTokens);
-  m.notificacoes = _supaMergeListaPorId(base.notificacoes, prio.notificacoes, 'criadoEm').slice(0, 200);
-  m.auditLog = _supaMergeListaPorId(base.auditLog, prio.auditLog, 'quando').slice(0, 200);
+  m._removidos = {};
+  _SUPA_TIPOS_COM_LAPIDE.forEach(function (tipo) { m._removidos[tipo] = Object.keys(removidosUnidos[tipo]); });
+
+  m.alunos = _supaMergeListaPorId(base.alunos, prio.alunos, removidosUnidos.alunos);
+  m.users = _supaMergeListaPorId(base.users, prio.users, removidosUnidos.users);
+  m.avaliacoes = _supaMergeListaPorId(base.avaliacoes, prio.avaliacoes, removidosUnidos.avaliacoes);
+  m.fichasClinicas = _supaMergeListaPorId(base.fichasClinicas, prio.fichasClinicas, removidosUnidos.fichasClinicas);
+  m.pacientes = _supaMergeListaPorId(base.pacientes, prio.pacientes, removidosUnidos.pacientes);
+  m.fichaModelos = _supaMergeListaPorId(base.fichaModelos, prio.fichaModelos, removidosUnidos.fichaModelos);
+  m.turmas = _supaMergeListaPorId(base.turmas, prio.turmas, removidosUnidos.turmas);
+  m.semestres = _supaMergeListaPorId(base.semestres, prio.semestres, removidosUnidos.semestres);
+  m.resetTokens = _supaMergeListaPorId(base.resetTokens, prio.resetTokens, null);
+  m.notificacoes = _supaMergeListaPorId(base.notificacoes, prio.notificacoes, null, 'criadoEm').slice(0, 200);
+  m.auditLog = _supaMergeListaPorId(base.auditLog, prio.auditLog, null, 'quando').slice(0, 200);
 
   var configBase = base.config || {};
   var configPrio = prio.config || {};
   m.config = Object.assign({}, configBase, configPrio);
-  m.config.materias = _supaMergeListaPorId(configBase.materias, configPrio.materias).map(function (mat) {
+  m.config.materias = _supaMergeListaPorId(configBase.materias, configPrio.materias, removidosUnidos.materias).map(function (mat) {
     var mBase = (configBase.materias || []).find(function (x) { return x.id === mat.id; });
     var mPrio = (configPrio.materias || []).find(function (x) { return x.id === mat.id; });
     return (mBase && mPrio) ? _supaMergeMateria(mBase, mPrio) : mat;
   });
-  m.config.cenarios = _supaMergeListaPorId(configBase.cenarios, configPrio.cenarios);
+  m.config.cenarios = _supaMergeListaPorId(configBase.cenarios, configPrio.cenarios, removidosUnidos.cenarios);
 
   m.instituicao = Object.assign({}, base.instituicao, prio.instituicao);
   return m;
@@ -2886,7 +2923,7 @@ function db_migrate(data) {
   if (data.version < 25) {
     const sessaoAtual = (typeof session_get === 'function') ? session_get() : null;
 
-    function dedupPorChave(lista, chaveDe, pontuar, reatribuir) {
+    function dedupPorChave(tipo, lista, chaveDe, pontuar, reatribuir) {
       const grupos = {};
       (lista || []).forEach(item => {
         const chave = chaveDe(item);
@@ -2902,6 +2939,7 @@ function db_migrate(data) {
         grupo.slice(1).forEach(perdedor => {
           reatribuir && reatribuir(perdedor, sobrevivente);
           idsRemover[perdedor.id] = true;
+          _registrarRemocao(data, tipo, perdedor.id);
         });
       });
       return (lista || []).filter(item => !idsRemover[item.id]);
@@ -2914,7 +2952,7 @@ function db_migrate(data) {
     //    de verdade vence; matérias e alunos apontando pro perdedor
     //    são realinhados pro sobrevivente.
     data.semestres = dedupPorChave(
-      data.semestres,
+      'semestres', data.semestres,
       s => (s.label || '').trim(),
       s => (data.alunos || []).filter(a => (a.semestresIds || []).includes(s.id)).length * 10
          + materiasArr.filter(m => m.semestreId === s.id).length,
@@ -2932,7 +2970,7 @@ function db_migrate(data) {
     // 2) Matérias (por nome + semestre já corrigido acima) — funde
     //    listas de alunos/supervisores em vez de escolher uma só.
     const materiasDeduped = dedupPorChave(
-      materiasArr,
+      'materias', materiasArr,
       m => (m.nome || '').trim() + '::' + m.semestreId,
       m => (m.alunos || []).length * 10 + (m.supervisores || []).length + (m.cenarios || []).length,
       (perdedor, sobrevivente) => {
@@ -2950,7 +2988,7 @@ function db_migrate(data) {
     // 3) Turmas (por nome) — quem tem mais alunos vinculados vence;
     //    alunos do perdedor são realinhados.
     data.turmas = dedupPorChave(
-      data.turmas,
+      'turmas', data.turmas,
       t => (t.nome || '').trim(),
       t => (data.alunos || []).filter(a => a.turmaId === t.id).length,
       (perdedor, sobrevivente) => {
@@ -2961,7 +2999,7 @@ function db_migrate(data) {
     // 4) Modelos de ficha (por título) — funde as matérias vinculadas
     //    e realinha fichas já preenchidas que apontavam pro perdedor.
     data.fichaModelos = dedupPorChave(
-      data.fichaModelos,
+      'fichaModelos', data.fichaModelos,
       fm => (fm.titulo || '').trim(),
       fm => (fm.materiasIds || []).length * 10 + (data.fichasClinicas || []).filter(f => f.modeloId === fm.id).length,
       (perdedor, sobrevivente) => {
@@ -2973,7 +3011,7 @@ function db_migrate(data) {
     // 5) Cenários (por nome) — realinha avaliações e os pesos dentro
     //    de cada matéria que referenciavam o perdedor.
     const cenariosDeduped = dedupPorChave(
-      cenariosArr,
+      'cenarios', cenariosArr,
       c => (c.nome || '').trim(),
       c => (data.avaliacoes || []).filter(av => av.cenarioId === c.id).length,
       (perdedor, sobrevivente) => {
@@ -2995,7 +3033,7 @@ function db_migrate(data) {
     //    (supervisor de aluno/matéria/avaliação, autor de modelo)
     //    antes de remover o perdedor.
     data.users = dedupPorChave(
-      data.users,
+      'users', data.users,
       u => (u.email || '').toLowerCase().trim(),
       u => {
         if (sessaoAtual && u.id === sessaoAtual.id) return Infinity;
@@ -3404,6 +3442,7 @@ function users_delete(id) {
   }
   const nome = db.users[idx].nome;
   db.users.splice(idx, 1);
+  _registrarRemocao(db, 'users', id);
   db_save(db);
   logAction(`Usuário excluído: ${nome}`);
   return { ok: true };
@@ -3464,6 +3503,7 @@ function turma_delete(id) {
   if (emUso) return { ok: false, msg: 'Não é possível excluir: já existem alunos vinculados a esta turma.' };
   const nome = db.turmas[idx].nome;
   db.turmas.splice(idx, 1);
+  _registrarRemocao(db, 'turmas', id);
   db_save(db);
   logAction(`Turma excluída: ${nome}`);
   return { ok: true };
@@ -3615,6 +3655,7 @@ function alunos_delete(id) {
   }
   const nome = db.alunos[idx].nome;
   db.alunos.splice(idx, 1);
+  _registrarRemocao(db, 'alunos', id);
   db_save(db);
   logAction(`Aluno(a) excluído(a): ${nome}`);
   return { ok: true };
@@ -3797,6 +3838,7 @@ function cenario_delete(cenarioId) {
   if (emUso) return { ok: false, msg: 'Não é possível excluir: já existem fichas lançadas para este cenário.' };
   const nome = db.config.cenarios[idx].nome;
   db.config.cenarios.splice(idx, 1);
+  _registrarRemocao(db, 'cenarios', cenarioId);
   db_save(db);
   logAction(`Cenário excluído: ${nome}`);
   return { ok: true };
@@ -4026,6 +4068,7 @@ function semestre_delete(id) {
     return { ok: false, msg: 'Não é possível excluir: já existem matérias vinculadas a este semestre.' };
   }
   db.semestres.splice(idx, 1);
+  _registrarRemocao(db, 'semestres', id);
   db_save(db);
   return { ok: true };
 }
@@ -4157,6 +4200,7 @@ function materia_delete(id) {
   if (idx === -1) return { ok: false, msg: 'Matéria não encontrada.' };
   const nome = db.config.materias[idx].nome;
   db.config.materias.splice(idx, 1);
+  _registrarRemocao(db, 'materias', id);
   db_save(db);
   logAction('Matéria excluída: ' + nome);
   return { ok: true };
@@ -4461,6 +4505,7 @@ function avaliacoes_delete(id) {
   const aval = db.avaliacoes[idx];
   const aluno = db.alunos.find(a => a.id === aval.alunoId);
   db.avaliacoes.splice(idx, 1);
+  _registrarRemocao(db, 'avaliacoes', id);
   db_save(db);
   logAction(`Ficha de avaliação excluída: ${aluno ? aluno.nome : '—'} (${avaliacao_cenarioNome(aval)})`);
   return { ok: true };
@@ -4874,6 +4919,7 @@ function fichaModelo_delete(id) {
     return { ok: false, msg: 'Não é possível excluir: já existem fichas lançadas usando este modelo.' };
   }
   db.fichaModelos.splice(idx, 1);
+  _registrarRemocao(db, 'fichaModelos', id);
   db_save(db);
   return { ok: true };
 }
@@ -4965,6 +5011,7 @@ function paciente_delete(id) {
     return { ok: false, msg: 'Não é possível excluir: já existem fichas lançadas para este paciente.' };
   }
   db.pacientes.splice(idx, 1);
+  _registrarRemocao(db, 'pacientes', id);
   db_save(db);
   return { ok: true };
 }
@@ -5112,6 +5159,7 @@ function fichaClinica_delete(id) {
   if (idx === -1) return { ok: false, msg: 'Ficha não encontrada.' };
   if (db.fichasClinicas[idx].status !== 'rascunho') return { ok: false, msg: 'Só é possível excluir fichas em rascunho — fichas integradas são permanentes.' };
   db.fichasClinicas.splice(idx, 1);
+  _registrarRemocao(db, 'fichasClinicas', id);
   db_save(db);
   return { ok: true };
 }
