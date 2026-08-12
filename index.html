@@ -7041,7 +7041,7 @@ function pode(acao) {
               <div style="display:flex;align-items:center;gap:.6rem;flex:1;min-width:0;">
                 <i class="ti ti-school" style="color:#2563EB;font-size:18px;flex-shrink:0;"></i>
                 <span class="mat-nome-display" style="font-weight:700;font-size:1rem;">${escapeHtml(m.nome)}</span>
-                <input class="mat-nome-input hidden" type="text" value="${escapeHtml(m.nome)}" style="font-size:1rem;font-weight:700;flex:1;">
+                <input class="mat-nome-input hidden" type="text" value="${escapeHtml(m.nome)}" style="font-size:1rem;font-weight:700;flex:1 1 160px;min-width:160px;">
                 <select class="mat-semestre-select" data-mat-id="${m.id}" title="Semestre desta matéria" style="font-size:11px;padding:2px 6px;border-radius:6px;flex-shrink:0;">
                   ${semestres_list().map(s => `<option value="${s.id}" ${s.id === m.semestreId ? 'selected' : ''}>${escapeHtml(s.label)}</option>`).join('')}
                 </select>
