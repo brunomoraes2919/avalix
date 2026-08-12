@@ -5856,6 +5856,7 @@ function pode(acao) {
 
     tbody.innerHTML = lista.map(a => {
       const qtdAval = alunos_countAvaliacoes(a.id);
+      const semMateria = !materias_doSemestreAtual().some(m => (m.alunos || []).includes(a.id));
       return `
         <tr data-id="${a.id}">
           <td>
@@ -5864,8 +5865,12 @@ function pode(acao) {
                 ${escapeHtml(initials(a.nome))}
               </div>
               <div>
-                <div style="font-weight:600;">${escapeHtml(a.nome)}</div>
+                <div style="font-weight:600;display:flex;align-items:center;gap:5px;">
+                  ${escapeHtml(a.nome)}
+                  ${semMateria ? `<i class="ti ti-alert-triangle-filled" style="color:#F59E0B;font-size:14px;" title="Não vinculado(a) a nenhuma matéria neste semestre — ainda não vê nenhuma ficha. Vincule em Configurações de parâmetros → Matérias."></i>` : ''}
+                </div>
                 ${a.email ? '<div style="font-size:12px;color:var(--ac-charcoal-soft);">' + escapeHtml(a.email) + '</div>' : ''}
+                ${semMateria ? '<div style="font-size:11.5px;color:#B45309;">Sem matéria vinculada — sem fichas visíveis</div>' : ''}
               </div>
             </div>
           </td>
@@ -6956,6 +6961,8 @@ function pode(acao) {
       const todosAlunos = (typeof alunos_list === 'function') ? alunos_list().filter(a => a.ativo) : [];
       const vinculados = (m.alunos || []);
       const dispAlunos = todosAlunos.filter(a => !vinculados.includes(a.id));
+      const alunosDoSemestreDaMateria = (typeof alunos_doSemestre === 'function') ? alunos_doSemestre(m.semestreId).filter(a => a.ativo) : [];
+      const pendentesDoSemestre = alunosDoSemestreDaMateria.filter(a => !vinculados.includes(a.id));
       const vinHtml = vinculados.map(aid => {
         const a = todosAlunos.find(x => x.id === aid) || { id: aid, nome: aid };
         return `<span class="badge badge-neutral" style="gap:.3rem;padding:.2rem .55rem .2rem .45rem;">
@@ -6969,13 +6976,21 @@ function pode(acao) {
             ${dispAlunos.map(a => `<option value="${a.id}">${escapeHtml(a.nome)}</option>`).join('')}
           </select>`
         : '<span style="font-size:12px;color:var(--ac-charcoal-soft);">Todos os alunos já vinculados.</span>';
+      const btnTodos = pendentesDoSemestre.length
+        ? `<button type="button" class="btn btn-ghost btn-sm mat-aluno-vincular-todos" data-mat-id="${m.id}" style="font-size:12px;">
+             <i class="ti ti-users-plus"></i> Vincular todos os ${pendentesDoSemestre.length} aluno(s) deste semestre
+           </button>`
+        : '';
       return `
         <div style="border-top:1px solid var(--ac-line);padding:.65rem 1.1rem .75rem;">
           <div style="font-size:12px;font-weight:700;color:var(--ac-charcoal-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.5rem;">Alunos vinculados a esta matéria</div>
           <div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:.5rem;min-height:22px;">
-            ${vinHtml || '<span style="font-size:12.5px;color:var(--ac-charcoal-soft);">Nenhum aluno vinculado ainda.</span>'}
+            ${vinHtml || '<span style="font-size:12.5px;color:var(--ac-charcoal-soft);">Nenhum aluno vinculado ainda — sem isso, ninguém vê as fichas desta matéria.</span>'}
           </div>
-          ${addSel}
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">
+            ${addSel}
+            ${btnTodos}
+          </div>
         </div>`;
     }
 
@@ -7271,6 +7286,21 @@ function pode(acao) {
         const novaLista = (mat.alunos || []).filter(a => a !== btn.dataset.uid);
         materia_update(btn.dataset.matId, { alunos: novaLista });
         renderMateriasCard(outerContainer);
+      });
+    });
+
+    // Vincular de uma vez todos os alunos matriculados no semestre desta matéria
+    card.querySelectorAll('.mat-aluno-vincular-todos').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const matId = btn.dataset.matId;
+        const mat = materia_get(matId);
+        if (!mat) return;
+        const doSemestre = (typeof alunos_doSemestre === 'function') ? alunos_doSemestre(mat.semestreId).filter(a => a.ativo) : [];
+        const novaLista = Array.from(new Set([...(mat.alunos || []), ...doSemestre.map(a => a.id)]));
+        const qtdAdicionados = novaLista.length - (mat.alunos || []).length;
+        materia_update(matId, { alunos: novaLista });
+        renderMateriasCard(outerContainer);
+        showToast(`${qtdAdicionados} aluno(s) vinculado(s) — já veem as fichas desta matéria.`, 'success');
       });
     });
   }
@@ -8951,6 +8981,7 @@ function pode(acao) {
         if (a.id === alunoAntes) opt.selected = true;
         alunoSel.appendChild(opt);
       });
+      alunoSel.disabled = alunosVinculados.length === 0;
 
       // Popular cenários da matéria
       const censDaMateria = (mat.cenarios || [])
