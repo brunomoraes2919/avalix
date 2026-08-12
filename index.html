@@ -12577,7 +12577,10 @@ function pode(acao) {
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;">
           ${materias.length
-            ? materias.map(mt => `<span class="badge badge-neutral" style="font-size:10.5px;">${escapeHtml(mt.nome)}</span>`).join('')
+            ? materias.map(mt => {
+                const qtdAlunos = (mt.alunos || []).length;
+                return `<span class="badge ${qtdAlunos ? 'badge-neutral' : 'badge-warning'}" style="font-size:10.5px;" title="${qtdAlunos ? qtdAlunos + ' aluno(s) vinculado(s) a esta matéria verão a ficha' : 'Esta matéria não tem nenhum aluno vinculado ainda — ninguém verá a ficha por ela'}">${escapeHtml(mt.nome)} · ${qtdAlunos} aluno${qtdAlunos === 1 ? '' : 's'}</span>`;
+              }).join('')
             : '<span class="badge badge-warning" style="font-size:10.5px;">Sem matéria vinculada — nenhum aluno vê ainda</span>'
           }
         </div>
@@ -12737,9 +12740,9 @@ function pode(acao) {
           ` : `
             <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;">
               ${materiasDisp.map(m => `
-                <label style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--ac-sand);padding:6px 10px;border-radius:8px;cursor:pointer;">
+                <label style="display:flex;align-items:center;gap:6px;font-size:13px;background:var(--ac-sand);padding:6px 10px;border-radius:8px;cursor:pointer;" title="${(m.alunos || []).length} aluno(s) vinculado(s) a esta matéria">
                   <input type="checkbox" data-materia-check="${m.id}" ${draftModelo.materiasIds.includes(m.id) ? 'checked' : ''}>
-                  ${escapeHtml(m.nome)}
+                  ${escapeHtml(m.nome)} <span style="color:var(--ac-charcoal-soft);">· ${(m.alunos || []).length} aluno${(m.alunos || []).length === 1 ? '' : 's'}</span>
                 </label>
               `).join('')}
             </div>
