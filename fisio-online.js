@@ -113,6 +113,27 @@
     return api('/rest/v1/avalix_partidas?or=(jogador_1_id.eq.'+encodeURIComponent(s.id)+',jogador_2_id.eq.'+encodeURIComponent(s.id)+')&status=in.(ativa,pausada,aguardando)&order=atualizado_em.desc&select=*').then(function(rows){matches=rows||[];repaintIfOpen();}).catch(function(){matches=[];});
   }
 
+  function loadChatNotifications() {
+    var s=current(); if(!s) return Promise.resolve();
+    return api('/rest/v1/avalix_conversas?or=(participante_1_id.eq.'+encodeURIComponent(s.id)+',participante_2_id.eq.'+encodeURIComponent(s.id)+')&select=id').then(function(rows){
+      conversations=rows||[]; if(!conversations.length) return [];
+      var ids=conversations.map(function(c){return c.id;}).join(',');
+      return api('/rest/v1/avalix_mensagens_jogo?conversa_id=in.('+encodeURIComponent(ids)+')&autor_id=neq.'+encodeURIComponent(s.id)+'&tipo=eq.texto&order=criado_em.desc&limit=100&select=id,autor_nome,texto,conversa_id,criado_em');
+    }).then(function(messages){
+      if(!messages || typeof notificacoes_create!=='function') return;
+      var db=db_load(), existing=db.notificacoes||[], changed=false;
+      messages.slice().reverse().forEach(function(m){
+        var marker='fisio-chat-'+m.id;
+        if(existing.some(function(n){return n.fisioMarker===marker;})) return;
+        var preview=String(m.texto||'').trim(); if(preview.length>70) preview=preview.slice(0,67)+'…';
+        notificacoes_create(s.id,'Nova mensagem de '+m.autor_nome+': '+preview,null,'jogar');
+        var updated=db_load(); if(updated.notificacoes&&updated.notificacoes[0]) updated.notificacoes[0].fisioMarker=marker;
+        db_save(updated); existing=updated.notificacoes||[]; changed=true;
+      });
+      if(changed){if(window.refreshNotifBadge)window.refreshNotifBadge();if(window.paintNotifList)window.paintNotifList();}
+    }).catch(function(){});
+  }
+
   function pickQuestion(used) {
     used=used||[]; var available=GAME_QUESTIONS.filter(function(q){return used.indexOf(q.id)<0;});
     if(!available.length) available=GAME_QUESTIONS.slice();
@@ -284,11 +305,12 @@
   function start() {
     if (running || !allowed()) return;
     running = true;
-    heartbeat(false); loadPresence(); loadInvites(); loadMatches();
+    heartbeat(false); loadPresence(); loadInvites(); loadMatches(); loadChatNotifications();
     timers.push(setInterval(function () { heartbeat(false); }, 20000));
     timers.push(setInterval(loadPresence, 8000));
     timers.push(setInterval(loadInvites, 6000));
     timers.push(setInterval(loadMatches, 7000));
+    timers.push(setInterval(loadChatNotifications, 6000));
   }
 
   function stop() {
