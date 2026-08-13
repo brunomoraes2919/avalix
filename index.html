@@ -1555,7 +1555,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <button class="btn btn-ghost btn-block btn-sm" id="logoutBtn" style="margin-top:10px;color:var(--ac-sand);border-color:rgba(246,243,236,0.25);">
         <i class="ti ti-logout"></i> Sair
       </button>
-      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-13 Â· v29-multiplayer</div>
+      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-13 Â· v32-estavel</div>
     </div>
   </aside>
 
@@ -2064,20 +2064,11 @@ function _supaPollCheck() {
         try { local = raw ? JSON.parse(raw) : null; } catch (e) { local = null; }
         var mesclado = local ? _supaMergeDados(local, row.dados, 'remoto') : row.dados;
         localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
-        /* Atualizar a tela atual suavemente — mas NUNCA enquanto
-           houver um formulário de edição sensível aberto (ex.:
-           lançamento de notas). Sem essa checagem, qualquer alteração
-           de QUALQUER outra pessoa no sistema forçava um recarregamento
-           da tela e apagava o que estava sendo digitado na hora. Os
-           dados já foram mesclados e salvos acima — só a atualização
-           visual é adiada até a pessoa terminar/sair da edição. */
-        try {
-          var activeBtn = document.querySelector('.nav-item.active');
-          var view = activeBtn ? activeBtn.dataset.view : null;
-          if (view && window.AvaliaClinNavigate && !window.__avalixEdicaoAberta) {
-            window.AvaliaClinNavigate(view);
-          }
-          if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge();
+        /* Os dados remotos ja foram mesclados no armazenamento. Nao
+           redesenhar automaticamente a tela ativa: recriar a view pode
+           fechar fichas, notas, modais, chats e formularios em andamento.
+           A interface atualiza ao navegar, salvar ou recarregar. */
+        try {          if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge();
           if (typeof window.paintNotifList === 'function') window.paintNotifList();
           /* Toast removido no polling rápido (5s) para não piscar */
         } catch(e) {}
