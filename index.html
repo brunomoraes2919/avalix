@@ -1834,6 +1834,35 @@ function _supaDedupNatural(data) {
    enviar — a mudança que acabou de ser feita nesta aba vence) ou
    'remoto' (usado ao receber — adota o que já está compartilhado,
    mas sem descartar nada que só existe localmente ainda). */
+/* Fichas integradas sao documentos finalizados: uma copia antiga em
+   rascunho nunca pode rebaixa-las durante a sincronizacao. Quando os
+   dois lados tem o mesmo estado, prevalece a alteracao mais recente. */
+function _supaMergeFichasClinicas(base, prioritaria, removidos) {
+  var mapa = {};
+  function instante(ficha) {
+    var valor = ficha && (ficha.atualizadoEm || ficha.integradoEm || ficha.criadoEm);
+    var ms = valor ? new Date(valor).getTime() : 0;
+    return isNaN(ms) ? 0 : ms;
+  }
+  function incluir(ficha, ehPrioritaria) {
+    if (!ficha || !ficha.id || (removidos && removidos[ficha.id])) return;
+    var atual = mapa[ficha.id];
+    if (!atual) { mapa[ficha.id] = ficha; return; }
+    var atualIntegrada = atual.status === 'integrada';
+    var novaIntegrada = ficha.status === 'integrada';
+    if (atualIntegrada !== novaIntegrada) {
+      mapa[ficha.id] = novaIntegrada ? ficha : atual;
+      return;
+    }
+    var atualMs = instante(atual);
+    var novoMs = instante(ficha);
+    if (novoMs > atualMs || (novoMs === atualMs && ehPrioritaria)) mapa[ficha.id] = ficha;
+  }
+  (base || []).forEach(function (ficha) { incluir(ficha, false); });
+  (prioritaria || []).forEach(function (ficha) { incluir(ficha, true); });
+  return Object.keys(mapa).map(function (id) { return mapa[id]; });
+}
+
 function _supaMergeDados(local, remoto, prioridade) {
   if (!remoto) return local;
   if (!local) return remoto;
@@ -1860,7 +1889,7 @@ function _supaMergeDados(local, remoto, prioridade) {
   m.alunos = _supaMergeListaPorId(base.alunos, prio.alunos, removidosUnidos.alunos);
   m.users = _supaMergeListaPorId(base.users, prio.users, removidosUnidos.users);
   m.avaliacoes = _supaMergeListaPorId(base.avaliacoes, prio.avaliacoes, removidosUnidos.avaliacoes);
-  m.fichasClinicas = _supaMergeListaPorId(base.fichasClinicas, prio.fichasClinicas, removidosUnidos.fichasClinicas);
+  m.fichasClinicas = _supaMergeFichasClinicas(base.fichasClinicas, prio.fichasClinicas, removidosUnidos.fichasClinicas);
   m.pacientes = _supaMergeListaPorId(base.pacientes, prio.pacientes, removidosUnidos.pacientes);
   m.fichaModelos = _supaMergeListaPorId(base.fichaModelos, prio.fichaModelos, removidosUnidos.fichaModelos);
   m.turmas = _supaMergeListaPorId(base.turmas, prio.turmas, removidosUnidos.turmas);
@@ -5361,11 +5390,17 @@ function fichaClinica_definirProfessorSupervisor(fichaId, professorId) {
 /* Integração — ação irreversível. Bloqueada se houver campo
    obrigatório do modelo ainda não preenchido. A partir daqui a ficha
    é só-leitura e passa a ficar visível para o(s) professor(es). */
-function fichaClinica_integrar(id) {
+function fichaClinica_integrar(id, dadosParciais) {
   const db = db_load();
   const ficha = (db.fichasClinicas || []).find(f => f.id === id);
   if (!ficha) return { ok: false, msg: 'Ficha não encontrada.' };
   if (ficha.status !== 'rascunho') return { ok: false, msg: 'Esta ficha já foi integrada.' };
+  // Salva e integra no mesmo ciclo. Assim nao existe uma janela em que
+  // a sincronizacao possa devolver ao navegador o rascunho anterior.
+  if (dadosParciais && typeof dadosParciais === 'object') {
+    ficha.dados = Object.assign({}, ficha.dados || {}, dadosParciais);
+    ficha.atualizadoEm = new Date().toISOString();
+  }
   const pendentes = fichaClinica_obrigatoriosPendentes(ficha);
   if (pendentes.length) {
     return { ok: false, msg: 'Preencha os campos obrigatórios antes de integrar: ' + pendentes.join(', ') + '.' };
@@ -12618,8 +12653,7 @@ function pode(acao) {
     });
 
     $('#btnIntegrarFichaClin', content).addEventListener('click', () => {
-      fichaClinica_update(currentFichaId, coletarDados());
-      abrirModalConfirmarIntegracao(content, paciente ? paciente.nome : '');
+      abrirModalConfirmarIntegracao(content, paciente ? paciente.nome : '', coletarDados());
     });
   }
 
@@ -12654,7 +12688,7 @@ function pode(acao) {
     document.body.appendChild(overlay);
   }
 
-  function abrirModalConfirmarIntegracao(content, nomePaciente) {
+  function abrirModalConfirmarIntegracao(content, nomePaciente, dadosParaIntegrar) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
@@ -12682,7 +12716,7 @@ function pode(acao) {
     overlay.querySelector('.modal-close').addEventListener('click', close);
     overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
     overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
-      const r = fichaClinica_integrar(currentFichaId);
+      const r = fichaClinica_integrar(currentFichaId, dadosParaIntegrar);
       close();
       if (r.ok) {
         showToast('Ficha integrada com sucesso.', 'success');
