@@ -6,7 +6,27 @@
   var presence = {};
   var invites = [];
   var conversations = [];
+  var matches = [];
   var ONLINE_MS = 45000;
+  var GAME_CATEGORIES = [
+    {id:'anatomia',name:'Anatomia',color:'#d96b5f'}, {id:'cinesio',name:'Cinesiologia',color:'#d8a83e'},
+    {id:'orto',name:'Ortopedia',color:'#3b82c4'}, {id:'neuro',name:'Neurologia',color:'#8858b5'},
+    {id:'cardio',name:'Cardiorrespiratória',color:'#d74c72'}, {id:'saude',name:'Saúde Coletiva e UTI',color:'#338f75'}
+  ];
+  var GAME_QUESTIONS = [
+    {id:'a1',cat:'anatomia',q:'Quantos ossos compõem, em média, o esqueleto humano adulto?',a:['196','206','216','226'],c:1,e:'O esqueleto humano adulto possui, em média, 206 ossos.'},
+    {id:'a2',cat:'anatomia',q:'Qual plano anatômico divide o corpo em partes anterior e posterior?',a:['Sagital','Transverso','Frontal','Oblíquo'],c:2,e:'O plano frontal, também chamado coronal, separa anterior e posterior.'},
+    {id:'c1',cat:'cinesio',q:'Na contração concêntrica, o músculo:',a:['Encurta ao gerar tensão','Alonga sob carga','Não muda de comprimento','Não produz tensão'],c:0,e:'Na contração concêntrica, o músculo encurta enquanto vence a resistência.'},
+    {id:'c2',cat:'cinesio',q:'O goniômetro é usado principalmente para medir:',a:['Força muscular','Equilíbrio','Amplitude articular','Frequência cardíaca'],c:2,e:'O goniômetro mede a amplitude de movimento articular em graus.'},
+    {id:'o1',cat:'orto',q:'O ligamento cruzado anterior limita principalmente:',a:['Translação anterior da tíbia','Translação posterior da tíbia','Flexão do quadril','Extensão do tornozelo'],c:0,e:'O LCA restringe a translação anterior excessiva da tíbia.'},
+    {id:'o2',cat:'orto',q:'A fratura de Colles ocorre tipicamente no:',a:['Úmero proximal','Rádio distal','Fêmur distal','Escafoide'],c:1,e:'A fratura de Colles acomete o rádio distal, frequentemente após queda com a mão estendida.'},
+    {id:'n1',cat:'neuro',q:'A escala de Glasgow avalia:',a:['Dor','Consciência','Força de preensão','Equilíbrio'],c:1,e:'A escala de Glasgow avalia abertura ocular, resposta verbal e resposta motora.'},
+    {id:'n2',cat:'neuro',q:'A doença de Parkinson está associada principalmente à redução de:',a:['Serotonina','Dopamina','Acetilcolina','Adrenalina'],c:1,e:'A degeneração de neurônios dopaminérgicos da substância negra é central no Parkinson.'},
+    {id:'r1',cat:'cardio',q:'Em um adulto saudável, a frequência respiratória de repouso costuma ser:',a:['4–8 irpm','12–20 irpm','25–35 irpm','40–50 irpm'],c:1,e:'Em adultos, a faixa habitual de repouso é de aproximadamente 12 a 20 incursões por minuto.'},
+    {id:'r2',cat:'cardio',q:'A saturação periférica de oxigênio é medida por:',a:['Espirômetro','Oxímetro de pulso','Manovacuômetro','Goniômetro'],c:1,e:'O oxímetro de pulso estima a saturação periférica de oxigênio.'},
+    {id:'s1',cat:'saude',q:'A higienização das mãos é uma medida fundamental para:',a:['Aumentar força','Prevenir infecções','Medir dor','Avaliar marcha'],c:1,e:'A higiene das mãos reduz a transmissão de microrganismos e infecções relacionadas à assistência.'},
+    {id:'s2',cat:'saude',q:'Na UTI, mobilização precoce busca principalmente:',a:['Prolongar sedação','Reduzir perdas funcionais','Aumentar imobilidade','Evitar avaliação'],c:1,e:'A mobilização precoce ajuda a reduzir fraqueza adquirida e perdas funcionais.'}
+  ];
 
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -88,6 +108,22 @@
     }).catch(function () { invites = []; paintBadge(); });
   }
 
+  function loadMatches() {
+    var s=current(); if(!s) return Promise.resolve();
+    return api('/rest/v1/avalix_partidas?or=(jogador_1_id.eq.'+encodeURIComponent(s.id)+',jogador_2_id.eq.'+encodeURIComponent(s.id)+')&status=in.(ativa,pausada,aguardando)&order=atualizado_em.desc&select=*').then(function(rows){matches=rows||[];repaintIfOpen();}).catch(function(){matches=[];});
+  }
+
+  function pickQuestion(used) {
+    used=used||[]; var available=GAME_QUESTIONS.filter(function(q){return used.indexOf(q.id)<0;});
+    if(!available.length) available=GAME_QUESTIONS.slice();
+    return available[Math.floor(Math.random()*available.length)];
+  }
+
+  function initialState(firstTurn) {
+    var q=pickQuestion([]);
+    return {version:1,turno:firstTurn,questao_id:q.id,usadas:[q.id],selos_1:[],selos_2:[],acertos_1:0,acertos_2:0,rodada:1,ultima_resposta:null};
+  }
+
   function syncInviteNotifications() {
     var s=current();
     if(!s || typeof notificacoes_create!=='function') return;
@@ -165,11 +201,11 @@
       if (!accept) return null;
       return api('/rest/v1/avalix_partidas', {
         method:'POST', headers:{'Prefer':'return=representation'},
-        body:JSON.stringify({ jogador_1_id:inviteRow.remetente_id, jogador_1_nome:inviteRow.remetente_nome, jogador_2_id:inviteRow.convidado_id, jogador_2_nome:inviteRow.convidado_nome, turno_id:inviteRow.remetente_id, status:'ativa', estado:{selos_1:[],selos_2:[],rodada:1} })
+        body:JSON.stringify({ jogador_1_id:inviteRow.remetente_id, jogador_1_nome:inviteRow.remetente_nome, jogador_2_id:inviteRow.convidado_id, jogador_2_nome:inviteRow.convidado_nome, turno_id:inviteRow.remetente_id, status:'ativa', estado:initialState(inviteRow.remetente_id), atualizado_em:new Date().toISOString() })
       });
     }).then(function (match) {
       window.showToast && showToast(accept ? 'Convite aceito. A partida foi criada.' : 'Convite recusado.', accept ? 'success' : 'warning');
-      return loadInvites().then(function () { if (accept && match && match[0]) renderMatch(match[0]); });
+      return Promise.all([loadInvites(),loadMatches()]).then(function () { if (accept && match && match[0]) renderMatch(match[0]); });
     }).catch(function () { window.showToast && showToast('Não foi possível responder ao convite.', 'danger'); });
   }
 
@@ -189,6 +225,7 @@
     var people = colleagues();
     container.innerHTML = '<style>' + styles + '</style><div class="fg-shell">' +
       '<section class="fg-hero"><div><span class="fg-kicker">FISIOGAME ONLINE</span><h2>Aprenda, desafie e conquiste as 6 áreas.</h2><p>Convide alguém da comunidade Avalix ou treine sozinho enquanto espera.</p></div><button class="btn btn-primary" id="fgSolo"><i class="ti ti-player-play"></i> Treinar sozinho</button></section>' +
+      (matches.length ? '<section class="fg-invites"><h3><i class="ti ti-swords"></i> Suas partidas</h3>'+matches.map(function(m){var s=current(),other=m.jogador_1_id===s.id?m.jogador_2_nome:m.jogador_1_nome,isTurn=m.turno_id===s.id;return '<div class="fg-invite"><div><b>'+esc(other)+'</b><span>'+(isTurn?'É sua vez de responder':'Aguardando a jogada do adversário')+'</span></div><button class="btn '+(isTurn?'btn-primary':'btn-ghost')+' btn-sm" data-match="'+esc(m.id)+'">Abrir partida</button></div>';}).join('')+'</section>' : '') +
       (received.length ? '<section class="fg-invites"><h3><i class="ti ti-mail-opened"></i> Convites recebidos</h3>' + received.map(function (i) { return '<div class="fg-invite"><div><b>' + esc(i.remetente_nome) + '</b><span>quer jogar uma partida com você</span></div><div><button class="btn btn-primary btn-sm" data-accept="' + esc(i.id) + '">Aceitar</button><button class="btn btn-ghost btn-sm" data-decline="' + esc(i.id) + '">Recusar</button></div></div>'; }).join('') + '</section>' : '') +
       '<section class="fg-community"><div class="fg-section-head"><div><span class="eyebrow">Comunidade</span><h3>Escolha seu adversário</h3></div><label class="fg-search"><i class="ti ti-search"></i><input id="fgSearch" placeholder="Buscar colega"></label></div>' +
       '<div class="fg-legend"><span><i class="fg-dot on"></i> Online agora</span><span><i class="fg-dot off"></i> Offline — receberá o convite ao entrar</span></div><div class="fg-grid" id="fgPeople"></div></section></div>';
@@ -210,6 +247,7 @@
     container.querySelectorAll('[data-chat]').forEach(function (b) { b.addEventListener('click', function () { var p=people.find(function(x){return x.id===b.dataset.chat;}); if(p) openChat(p,container); }); });
     container.querySelectorAll('[data-accept]').forEach(function (b) { b.addEventListener('click', function () { respondInvite(b.dataset.accept, true); }); });
     container.querySelectorAll('[data-decline]').forEach(function (b) { b.addEventListener('click', function () { respondInvite(b.dataset.decline, false); }); });
+    container.querySelectorAll('[data-match]').forEach(function (b) { b.addEventListener('click', function () { var m=matches.find(function(x){return String(x.id)===String(b.dataset.match);}); if(m) renderMatch(m); }); });
   }
 
   function renderSolo(container) {
@@ -220,8 +258,21 @@
   function renderMatch(match) {
     var container = document.getElementById('viewContent');
     if (!container) return;
-    container.innerHTML = '<style>' + styles + '</style><div class="fg-match"><div class="fg-match-icon"><i class="ti ti-swords"></i></div><span class="fg-kicker">PARTIDA ONLINE CRIADA</span><h2>' + esc(match.jogador_1_nome) + ' × ' + esc(match.jogador_2_nome) + '</h2><p>A sala está pronta. O motor de perguntas sincronizadas será conectado na próxima etapa; a presença e os convites já estão funcionando.</p><button class="btn btn-primary" id="fgReturn">Voltar à comunidade</button></div>';
+    var s=current(), state=typeof match.estado==='string'?JSON.parse(match.estado):match.estado||{}, q=GAME_QUESTIONS.find(function(x){return x.id===state.questao_id;})||pickQuestion(state.usadas), mine=match.jogador_1_id===s.id, mySeals=mine?(state.selos_1||[]):(state.selos_2||[]), otherSeals=mine?(state.selos_2||[]):(state.selos_1||[]), myTurn=match.turno_id===s.id, otherName=mine?match.jogador_2_nome:match.jogador_1_nome;
+    function seals(list){return GAME_CATEGORIES.map(function(c){return '<i title="'+esc(c.name)+'" style="background:'+(list.indexOf(c.id)>=0?c.color:'#dfe4e2')+'"></i>';}).join('');}
+    container.innerHTML='<style>'+styles+gameStyles+'</style><div class="fg-play"><div class="fg-play-head"><button class="btn btn-ghost btn-sm" id="fgReturn"><i class="ti ti-arrow-left"></i></button><div><b>Você × '+esc(otherName)+'</b><span>Rodada '+(state.rodada||1)+'</span></div><span class="fg-turn '+(myTurn?'mine':'wait')+'">'+(myTurn?'Sua vez':'Aguardando '+esc(otherName))+'</span></div><div class="fg-score"><div><b>Você</b><span class="fg-seals">'+seals(mySeals)+'</span></div><div><b>'+esc(otherName)+'</b><span class="fg-seals">'+seals(otherSeals)+'</span></div></div>'+(myTurn?'<div class="fg-question"><span class="fg-category" style="--cat:'+((GAME_CATEGORIES.find(function(c){return c.id===q.cat;})||{}).color||'#338f75')+'">'+esc((GAME_CATEGORIES.find(function(c){return c.id===q.cat;})||{}).name||q.cat)+'</span><h2>'+esc(q.q)+'</h2><div class="fg-options">'+q.a.map(function(a,i){return '<button data-answer="'+i+'">'+String.fromCharCode(65+i)+'. '+esc(a)+'</button>';}).join('')+'</div><div id="fgAnswerNote"></div></div>':'<div class="fg-wait"><i class="ti ti-clock-pause"></i><h2>A partida está aguardando.</h2><p>'+esc(otherName)+' pode responder quando voltar ao Avalix. Você receberá a vez depois da jogada dele.</p></div>')+'</div>';
     container.querySelector('#fgReturn').addEventListener('click', function () { renderView(container); });
+    container.querySelectorAll('[data-answer]').forEach(function(btn){btn.onclick=function(){answerMatch(match,state,q,Number(btn.dataset.answer),container);};});
+  }
+
+  function answerMatch(match,state,q,answer,container){
+    container.querySelectorAll('[data-answer]').forEach(function(b){b.disabled=true;});
+    var correct=answer===q.c, p1=match.jogador_1_id===current().id, seals=p1?(state.selos_1||[]):(state.selos_2||[]);
+    if(correct&&seals.indexOf(q.cat)<0) seals.push(q.cat);
+    if(p1){state.selos_1=seals;if(correct)state.acertos_1=(state.acertos_1||0)+1;}else{state.selos_2=seals;if(correct)state.acertos_2=(state.acertos_2||0)+1;}
+    var won=seals.length>=6, next=match.jogador_1_id===current().id?match.jogador_2_id:match.jogador_1_id, nq=pickQuestion(state.usadas||[]);
+    state.usadas=(state.usadas||[]).concat([nq.id]); state.questao_id=nq.id; state.rodada=(state.rodada||1)+1; state.ultima_resposta={por:current().id,correta:correct,questao:q.id,em:new Date().toISOString()};
+    api('/rest/v1/avalix_partidas?id=eq.'+encodeURIComponent(match.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({estado:state,turno_id:next,status:won?'finalizada':'ativa',atualizado_em:new Date().toISOString()})}).then(function(){window.showToast&&showToast(correct?'Resposta correta! Área conquistada.':'Resposta incorreta. A vez passou para o adversário.',correct?'success':'warning');return loadMatches();}).then(function(){renderView(container);});
   }
 
   function repaintIfOpen() {
@@ -233,10 +284,11 @@
   function start() {
     if (running || !allowed()) return;
     running = true;
-    heartbeat(false); loadPresence(); loadInvites();
+    heartbeat(false); loadPresence(); loadInvites(); loadMatches();
     timers.push(setInterval(function () { heartbeat(false); }, 20000));
     timers.push(setInterval(loadPresence, 8000));
     timers.push(setInterval(loadInvites, 6000));
+    timers.push(setInterval(loadMatches, 7000));
   }
 
   function stop() {
@@ -245,6 +297,8 @@
     timers.forEach(clearInterval); timers=[]; running=false; presence={}; invites=[]; paintBadge();
   }
 
+
+  var gameStyles='.fg-play{max-width:900px;margin:auto}.fg-play-head,.fg-score{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid rgba(30,50,45,.1);padding:13px;border-radius:15px;margin-bottom:12px}.fg-play-head>div{display:grid;flex:1}.fg-play-head span{font-size:11px;color:var(--ac-charcoal-soft)}.fg-turn{padding:7px 10px!important;border-radius:999px;font-weight:700}.fg-turn.mine{background:#dceee9;color:#176354!important}.fg-turn.wait{background:#f2eee4;color:#76633d!important}.fg-score{justify-content:space-between}.fg-score>div{display:grid;gap:5px}.fg-score>div:last-child{text-align:right}.fg-seals{display:flex;gap:5px}.fg-seals i{width:14px;height:14px;border-radius:50%}.fg-question,.fg-wait{background:#fff;border:1px solid rgba(30,50,45,.1);border-radius:20px;padding:clamp(20px,4vw,38px)}.fg-category{display:inline-block;color:#fff;background:var(--cat);border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800}.fg-question h2{margin:15px 0 22px}.fg-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}.fg-options button{border:1px solid rgba(30,50,45,.15);background:#fff;border-radius:12px;padding:14px;text-align:left;cursor:pointer;font-weight:600}.fg-options button:hover{border-color:#338f75;background:#edf7f4}.fg-wait{text-align:center;padding:60px 25px}.fg-wait>i{font-size:48px;color:#9b8a61}@media(max-width:600px){.fg-options{grid-template-columns:1fr}.fg-play-head{align-items:flex-start;flex-wrap:wrap}.fg-turn{width:100%;text-align:center}}';
   var chatStyles='.fg-person-actions{display:flex;gap:6px}.fg-chat{height:calc(100vh - 145px);min-height:560px;display:flex;flex-direction:column;max-width:860px;margin:auto;background:#fff;border:1px solid rgba(30,50,45,.1);border-radius:18px;overflow:hidden}.fg-chat-head{display:flex;align-items:center;gap:10px;padding:13px;border-bottom:1px solid rgba(30,50,45,.1)}.fg-chat-head .fg-avatar{width:40px;height:40px}.fg-chat-head>div:nth-child(3){display:grid;flex:1}.fg-chat-head span{font-size:11px;color:var(--ac-charcoal-soft)}.fg-chat-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:9px;background:#f7f8f7}.fg-message{max-width:74%;padding:9px 12px;border-radius:14px;background:#fff;align-self:flex-start;display:grid}.fg-message.mine{align-self:flex-end;background:#dceee9}.fg-message.event{align-self:center;max-width:90%;background:#fff8e8;text-align:center}.fg-message small{font-size:9px;color:var(--ac-charcoal-soft);margin-top:4px}.fg-chat-form{display:flex;gap:8px;padding:12px;border-top:1px solid rgba(30,50,45,.1)}.fg-chat-form input{flex:1}';
 
   var styles = '\
