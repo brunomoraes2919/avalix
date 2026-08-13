@@ -4663,10 +4663,22 @@ function avaliacoes_update(id, payload) {
 }
 
 function avaliacoes_delete(id) {
+  const session = session_get();
+  if (!session || !['admin', 'professor'].includes(session.papel)) {
+    return { ok: false, msg: 'Apenas professores e administradores podem excluir rascunhos.' };
+  }
   const db = db_load();
   const idx = db.avaliacoes.findIndex(a => a.id === id);
   if (idx === -1) return { ok: false, msg: 'Ficha não encontrada.' };
   const aval = db.avaliacoes[idx];
+  if (aval.status !== 'rascunho') {
+    return { ok: false, msg: 'Somente lançamentos em rascunho podem ser excluídos.' };
+  }
+  if (session.papel === 'professor') {
+    const vinculado = aval.supervisorPrincipalId === session.id ||
+      (Array.isArray(aval.supervisoresCompartilhadosIds) && aval.supervisoresCompartilhadosIds.includes(session.id));
+    if (!vinculado) return { ok: false, msg: 'Você não está vinculado(a) a este lançamento.' };
+  }
   const aluno = db.alunos.find(a => a.id === aval.alunoId);
   db.avaliacoes.splice(idx, 1);
   _registrarRemocao(db, 'avaliacoes', id);
@@ -8647,6 +8659,7 @@ function pode(acao) {
                 <i class="ti ti-${canEdit && !isF ? 'edit' : 'eye'}"></i>
                 ${canEdit && !isF ? 'Lançar notas' : 'Visualizar'}
               </button>
+              ${canEdit && !isF ? `<button class="btn btn-danger btn-sm grupo-excluir-rascunho" data-aval-id="${av.id}" title="Excluir este rascunho"><i class="ti ti-trash"></i> Excluir</button>` : ''}
             </div>`;
           }).join('')}
         </div>
@@ -8676,6 +8689,24 @@ function pode(acao) {
       btn.addEventListener('click', () => {
         overlay.remove();
         openEditor(btn.dataset.avalId, container, canEdit);
+      });
+    });
+    overlay.querySelectorAll('.grupo-excluir-rascunho').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const av = avaliacoes_get(btn.dataset.avalId);
+        const box = buildConfirmModal({
+          title: 'Excluir lançamento em rascunho',
+          message: `Tem certeza que deseja excluir o rascunho de <strong>${escapeHtml(av ? avaliacao_cenarioNome(av) : '')}</strong>? Essa ação não pode ser desfeita.`,
+          confirmLabel: 'Excluir rascunho', danger: true,
+          onConfirm: () => {
+            const res = avaliacoes_delete(btn.dataset.avalId);
+            if (!res.ok) { showToast(res.msg, 'danger'); return; }
+            overlay.remove();
+            showToast('Rascunho excluído.', 'success');
+            paintListTable(container);
+          }
+        });
+        document.body.appendChild(box);
       });
     });
   }
@@ -8890,7 +8921,7 @@ function pode(acao) {
             </button>
             ${avs.length === 1 ? `
             <button class="btn btn-ghost btn-sm btn-icon grupo-pdf" data-aval-id="${avs[0].id}" title="Gerar PDF" aria-label="Gerar PDF"><i class="ti ti-printer"></i></button>
-            ${canEdit ? `<button class="btn btn-danger btn-sm btn-icon grupo-delete" data-aval-id="${avs[0].id}" title="Excluir" aria-label="Excluir"><i class="ti ti-trash"></i></button>` : ''}
+            ${canEdit && avs[0].status === 'rascunho' ? `<button class="btn btn-danger btn-sm btn-icon grupo-delete" data-aval-id="${avs[0].id}" title="Excluir rascunho" aria-label="Excluir rascunho"><i class="ti ti-trash"></i></button>` : ''}
             ` : ''}
           </td>
         </tr>
@@ -11215,6 +11246,7 @@ function pode(acao) {
 
   function exitApp() {
     if (window.FisioGameOnline) window.FisioGameOnline.stop();
+    if (window.FisioGameBeta) window.FisioGameBeta.lock();
     $('#screen-app').classList.add('hidden');
     $('#screen-login').classList.remove('hidden');
     $('#loginForm').reset();

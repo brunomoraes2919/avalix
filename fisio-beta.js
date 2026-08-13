@@ -86,4 +86,8 @@
 
   window.AvaliaClinViews = window.AvaliaClinViews || {};
   window.AvaliaClinViews.jogar = render;
+  window.FisioGameBeta = {
+    lock: function () { sessionStorage.removeItem(ACCESS_SESSION_KEY); },
+    hasAccess: hasAccess
+  };
 })();
