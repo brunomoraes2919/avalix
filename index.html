@@ -516,7 +516,24 @@ input::placeholder, textarea::placeholder { color: #B3ABA0; }
   position: sticky;
   top: 0;
   height: 100vh;
+  /* Sem isso, quando o menu tem muitos itens (varia por papel — admin
+     vê mais telas que aluno/professor), o conteúdo passava da altura
+     da tela e empurrava o rodapé (usuário + botão "Sair") pra fora,
+     sem rolagem nenhuma — dava a impressão de que o botão tinha
+     sumido. Agora só o menu rola por dentro; marca, usuário e "Sair"
+     ficam sempre visíveis. */
+  overflow: hidden;
 }
+
+#nav-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+#nav-list::-webkit-scrollbar { width: 6px; }
+#nav-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 10px; }
+#nav-list::-webkit-scrollbar-track { background: transparent; }
 
 .sidebar .brand-mark {
   display: flex;
@@ -8343,6 +8360,16 @@ function pode(acao) {
     currentMode = 'list';
     currentAvalId = null;
     window.__avalixEdicaoAberta = false;
+    /* Reseta os filtros ao entrar pelo menu — sem isso, um filtro de
+       status deixado em "Finalizada" numa visita anterior continuava
+       ativo silenciosamente e escondia rascunhos recém-criados, dando
+       a impressão de que eles tinham sumido. */
+    listSearch = '';
+    listStatus = 'todos';
+    listCenario = 'todos';
+    listSupervisor = 'todos';
+    sisModo = false;
+    sisSelecionados = new Set();
     paintList(container);
   }
 
@@ -9155,6 +9182,11 @@ function pode(acao) {
     currentMode = 'list';
     currentAvalId = null;
     window.__avalixEdicaoAberta = false;
+    /* Mesma lógica do renderAvaliacoesView: garante que quem acabou de
+       criar/salvar uma ficha (rascunho ou finalizada) sempre a
+       encontre ao voltar, mesmo que um filtro de status diferente
+       tivesse ficado ativo de uma visita anterior. */
+    listStatus = 'todos';
     paintList(container);
   }
 
@@ -9264,7 +9296,7 @@ function pode(acao) {
       if (window.AvaliaClinNavigate) AvaliaClinNavigate('relatorios', { avalId: aval.id });
     });
 
-    paintBlocosGrid(container, aval, blocos, quinzenasFicha, isLocked);
+    paintBlocosGrid(container, aval, blocos, quinzenasFicha, isLocked, cfg);
     recalcAndPaint(container, aval, blocos, cfg);
 
     if (!isLocked) {
@@ -9480,7 +9512,7 @@ function pode(acao) {
     return { status: 'ok', value: String(num) };
   }
 
-  function paintBlocosGrid(container, aval, blocos, quinzenas, isLocked) {
+  function paintBlocosGrid(container, aval, blocos, quinzenas, isLocked, cfg) {
     const wrap = $('#ed-blocos', container);
     wrap.innerHTML = blocos.map(bloco => `
       <div class="card" style="margin-bottom:1.1rem;">
