@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FisioGame — Trivia de Fisioterapia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#EEF3EE;
+    --grid-line: rgba(31,58,55,0.06);
+    --surface:#FFFFFF;
+    --surface-2:#F6F8F5;
+    --ink:#1E2E2B;
+    --ink-soft:#5C6E69;
+    --line: rgba(30,46,44,0.14);
+    --accent:#1F5E55;
+    --accent-ink:#12332D;
+    --danger:#C0453B;
+    --good:#2E8B57;
+    --radius-lg:22px;
+    --radius-md:14px;
+    --radius-sm:9px;
+    --shadow: 0 14px 34px -16px rgba(15,51,45,0.32);
+    --shadow-sm: 0 6px 16px -10px rgba(15,51,45,0.3);
+    --cat-anatomia:#D9A23D;
+    --cat-cinesio:#C25450;
+    --cat-orto:#4C8C6B;
+    --cat-neuro:#4067A8;
+    --cat-cardio:#A8477A;
+    --cat-saude:#7A5C9E;
+    --font-display:'Fraunces', serif;
+    --font-body:'Manrope', sans-serif;
+    --font-mono:'Space Grotesk', monospace;
+  }
+  *{ box-sizing:border-box; }
+  html{ -webkit-text-size-adjust:100%; }
+  body{
+    margin:0;
+    font-family:var(--font-body);
+    color:var(--ink);
+    background-color:var(--bg);
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size:26px 26px;
+    min-height:100vh;
+    line-height:1.45;
+  }
+  #app{ max-width:1040px; margin:0 auto; padding:28px 18px 60px; }
+  h1,h2,h3{ font-family:var(--font-display); margin:0; color:var(--accent-ink); }
+  button{ font-family:inherit; }
+  .screen{ display:none; animation:fade .35s ease; }
+  .screen.active{ display:block; }
+  @keyframes fade{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+
+  a:focus-visible, button:focus-visible, input:focus-visible{
+    outline:3px solid var(--accent);
+    outline-offset:2px;
+  }
+
+  /* ---------- header / brand ---------- */
+  .brand{ text-align:center; margin-bottom:26px; }
+  .brand .eyebrow{
+    font-family:var(--font-mono); font-size:12.5px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--accent); font-weight:700; display:inline-flex; align-items:center; gap:8px;
+  }
+  .brand .eyebrow::before, .brand .eyebrow::after{ content:''; width:22px; height:1px; background:var(--accent); opacity:.5; }
+  .brand h1{ font-size:clamp(2.1rem, 6vw, 3.2rem); font-weight:700; margin-top:6px; letter-spacing:-.01em; }
+  .brand h1 em{ font-style:italic; color:var(--accent); }
+  .brand p{ color:var(--ink-soft); max-width:520px; margin:8px auto 0; font-size:15px; }
+
+  /* ---------- cards / surfaces ---------- */
+  .card{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); box-shadow:var(--shadow-sm); }
+
+  /* ---------- setup screen ---------- */
+  .setup-grid{ display:grid; grid-template-columns:1.1fr .9fr; gap:20px; align-items:start; }
+  @media (max-width:760px){ .setup-grid{ grid-template-columns:1fr; } }
+
+  .panel{ padding:22px 22px 24px; }
+  .panel h2{ font-size:1.25rem; margin-bottom:4px; }
+  .panel .sub{ color:var(--ink-soft); font-size:13.5px; margin:0 0 16px; }
+
+  .mode-toggle{ display:flex; gap:8px; margin-bottom:16px; }
+  .mode-btn{
+    flex:1; padding:11px 10px; border-radius:var(--radius-sm); border:1.5px solid var(--line);
+    background:var(--surface-2); color:var(--ink-soft); font-weight:700; font-size:13.5px; cursor:pointer;
+    transition:.15s;
+  }
+  .mode-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  .stepper-row{ display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+  .stepper-row span{ font-size:13px; color:var(--ink-soft); font-weight:600; }
+  .stepper{ display:flex; gap:6px; }
+  .step-btn{
+    width:38px; height:38px; border-radius:10px; border:1.5px solid var(--line); background:var(--surface-2);
+    font-family:var(--font-mono); font-weight:700; font-size:14px; color:var(--ink); cursor:pointer; transition:.15s;
+  }
+  .step-btn.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  .name-inputs{ display:flex; flex-direction:column; gap:9px; margin-bottom:18px; }
+  .name-inputs input{
+    width:100%; padding:11px 13px; border-radius:10px; border:1.5px solid var(--line); background:var(--surface-2);
+    font-size:14.5px; color:var(--ink); font-family:var(--font-body);
+  }
+  .name-inputs input::placeholder{ color:#93A39E; }
+
+  .rules{ list-style:none; margin:0 0 18px; padding:0; display:flex; flex-direction:column; gap:9px; }
+  .rules li{ display:flex; gap:10px; font-size:13.5px; color:var(--ink-soft); }
+  .rules li b{ color:var(--ink); font-family:var(--font-mono); font-size:12px; background:var(--surface-2); border:1px solid var(--line); border-radius:6px; width:20px; height:20px; display:flex; align-items:center; justify-content:center; flex:none; }
+
+  .start-btn{
+    width:100%; padding:14px; border-radius:12px; border:none; background:var(--accent); color:#fff;
+    font-weight:800; font-size:15.5px; cursor:pointer; box-shadow:var(--shadow-sm); transition:.15s;
+    font-family:var(--font-display); letter-spacing:.01em;
+  }
+  .start-btn:hover{ filter:brightness(1.08); transform:translateY(-1px); }
+
+  .cat-legend{ display:flex; flex-direction:column; gap:10px; }
+  .cat-row{ display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:11px; background:var(--surface-2); border:1px solid var(--line); }
+  .cat-swatch{ width:30px; height:30px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex:none; color:#fff; }
+  .cat-swatch svg{ width:16px; height:16px; }
+  .cat-row .name{ font-size:13.5px; font-weight:700; }
+  .cat-row .count{ margin-left:auto; font-family:var(--font-mono); font-size:11.5px; color:var(--ink-soft); }
+
+  /* ---------- game screen ---------- */
+  .turn-bar{
+    display:flex; align-items:center; justify-content:center; gap:8px; text-align:center;
+    font-family:var(--font-display); font-size:1.05rem; margin-bottom:16px; min-height:28px;
+    color:var(--accent-ink);
+  }
+
+  .hud{ display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:22px; }
+  .player-card{
+    display:flex; align-items:center; gap:10px; background:var(--surface); border:1.6px solid var(--line);
+    border-radius:14px; padding:8px 12px 8px 8px; box-shadow:var(--shadow-sm); transition:.2s;
+  }
+  .player-card.active{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(31,94,85,0.15), var(--shadow-sm); }
+  .avatar{
+    width:34px; height:34px; border-radius:50%; background:var(--accent-ink); color:#fff; display:flex;
+    align-items:center; justify-content:center; font-family:var(--font-display); font-weight:700; font-size:14px; flex:none;
+  }
+  .mini-dial{ position:relative; width:34px; height:34px; flex:none; }
+  .mini-dot{ position:absolute; inset:0; }
+  .mini-dot i{
+    position:absolute; left:50%; top:0; width:8px; height:8px; margin-left:-4px; border-radius:50%;
+    background:var(--dotcolor); opacity:.28; transition:.25s;
+  }
+  .mini-dot.filled i{ opacity:1; box-shadow:0 0 0 2px #fff, 0 0 0 3px var(--dotcolor); }
+  .player-meta{ display:flex; flex-direction:column; }
+  .player-meta .pname{ font-size:13px; font-weight:800; }
+  .player-meta .pscore{ font-family:var(--font-mono); font-size:10.5px; color:var(--ink-soft); }
+
+  .stage{ display:flex; flex-direction:column; align-items:center; gap:20px; }
+
+  /* goniometer dial */
+  .dial-wrap{ width:clamp(220px, 42vw, 300px); aspect-ratio:1/1; position:relative; }
+  .dial{
+    position:absolute; inset:0; border-radius:50%;
+    background: conic-gradient(from -30deg,
+      var(--cat-anatomia) 0deg 60deg,
+      var(--cat-cinesio) 60deg 120deg,
+      var(--cat-orto) 120deg 180deg,
+      var(--cat-neuro) 180deg 240deg,
+      var(--cat-cardio) 240deg 300deg,
+      var(--cat-saude) 300deg 360deg);
+    box-shadow: var(--shadow), inset 0 0 0 7px var(--surface), inset 0 0 0 8px var(--line);
+  }
+  .dial-face{
+    position:absolute; inset:20%; border-radius:50%; background:var(--surface);
+    box-shadow:inset 0 0 0 1px var(--line), 0 2px 8px rgba(0,0,0,.06);
+    display:flex; align-items:center; justify-content:center; text-align:center; padding:6%;
+  }
+  .dial-face span{ font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); font-weight:700; line-height:1.3; }
+  .ticks{ position:absolute; inset:0; }
+  .tick{ position:absolute; inset:0; }
+  .tick i{ position:absolute; left:50%; top:2px; width:1.4px; height:8px; background:var(--ink); opacity:.28; margin-left:-.7px; }
+  .tick.major i{ height:12px; opacity:.4; width:2px; margin-left:-1px; }
+  .cat-icon-wrap{ position:absolute; inset:0; }
+  .cat-icon{
+    position:absolute; left:50%; top:13%; width:26px; height:26px; margin-left:-13px; color:#fff;
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,.25));
+  }
+  .cat-icon svg{ width:100%; height:100%; }
+  .needle-rot{ position:absolute; inset:0; transform:rotate(var(--rot,0deg)); transition:transform 3.1s cubic-bezier(.15,.62,.2,1); }
+  .needle-hand{
+    position:absolute; left:50%; top:9%; width:5px; height:41%; margin-left:-2.5px;
+    background:linear-gradient(var(--accent-ink), var(--ink)); border-radius:5px 5px 2px 2px;
+    box-shadow:0 2px 5px rgba(0,0,0,.25);
+  }
+  .needle-hand::after{
+    content:''; position:absolute; left:50%; top:-6px; width:0; height:0; margin-left:-6px;
+    border-left:6px solid transparent; border-right:6px solid transparent; border-bottom:9px solid var(--accent-ink);
+  }
+  .pivot{
+    position:absolute; left:50%; top:50%; width:22px; height:22px; margin:-11px; border-radius:50%;
+    background:var(--accent-ink); box-shadow:0 0 0 4px var(--surface), 0 0 0 5.5px var(--line);
+  }
+
+  .spin-btn{
+    padding:13px 30px; border-radius:100px; border:none; background:var(--accent-ink); color:#fff;
+    font-family:var(--font-display); font-weight:700; font-size:15px; cursor:pointer; box-shadow:var(--shadow-sm);
+    transition:.15s;
+  }
+  .spin-btn:disabled{ opacity:.45; cursor:not-allowed; }
+  .spin-btn:not(:disabled):hover{ transform:translateY(-1px); filter:brightness(1.1); }
+
+  /* question card */
+  .question-card{ width:100%; max-width:640px; padding:22px; display:none; }
+  .question-card.show{ display:block; }
+  .q-cat-tag{
+    display:inline-flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:11px;
+    font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#fff; padding:4px 10px 4px 6px;
+    border-radius:100px; margin-bottom:12px;
+  }
+  .q-cat-tag .dot{ width:9px; height:9px; border-radius:50%; background:#fff; opacity:.85; }
+  .timer-row{ display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .timer-ring-wrap{ width:40px; height:40px; flex:none; position:relative; }
+  .timer-ring-wrap svg{ width:100%; height:100%; transform:rotate(-90deg); }
+  .timer-ring-bg{ fill:none; stroke:var(--line); stroke-width:5; }
+  .timer-ring{ fill:none; stroke:var(--good); stroke-width:5; stroke-linecap:round; transition:stroke-dashoffset 1s linear, stroke .3s; }
+  .timer-ring-wrap b{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:var(--font-mono);
+    font-size:12.5px; font-weight:700;
+  }
+  .q-text{ font-family:var(--font-display); font-size:1.2rem; font-weight:600; line-height:1.4; margin-bottom:18px; color:var(--accent-ink); }
+  .options{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media (max-width:560px){ .options{ grid-template-columns:1fr; } }
+  .opt-btn{
+    text-align:left; padding:13px 14px; border-radius:12px; border:1.6px solid var(--line); background:var(--surface-2);
+    font-size:14px; font-weight:600; color:var(--ink); cursor:pointer; transition:.15s; display:flex; gap:10px; align-items:flex-start;
+  }
+  .opt-btn .letter{
+    font-family:var(--font-mono); font-size:11.5px; font-weight:700; color:var(--ink-soft); background:var(--surface);
+    border:1px solid var(--line); border-radius:6px; width:20px; height:20px; display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .opt-btn:hover:not(:disabled){ border-color:var(--accent); background:#fff; }
+  .opt-btn:disabled{ cursor:default; }
+  .opt-btn.correct{ background:rgba(46,139,87,0.12); border-color:var(--good); }
+  .opt-btn.correct .letter{ background:var(--good); color:#fff; border-color:var(--good); }
+  .opt-btn.incorrect{ background:rgba(192,69,59,0.1); border-color:var(--danger); }
+  .opt-btn.incorrect .letter{ background:var(--danger); color:#fff; border-color:var(--danger); }
+
+  .explain{ display:none; margin-top:16px; padding:13px 14px; border-radius:12px; background:var(--surface-2); border:1px solid var(--line); font-size:13.5px; color:var(--ink-soft); }
+  .explain.show{ display:block; }
+  .explain b{ color:var(--ink); font-family:var(--font-mono); font-size:11px; letter-spacing:.04em; text-transform:uppercase; display:block; margin-bottom:5px; }
+  .continue-btn{
+    display:none; margin-top:16px; width:100%; padding:12px; border-radius:12px; border:none; background:var(--accent-ink);
+    color:#fff; font-weight:800; font-family:var(--font-display); font-size:14.5px; cursor:pointer;
+  }
+  .continue-btn.show{ display:block; }
+
+  /* ---------- end screen ---------- */
+  .end-wrap{ text-align:center; padding:34px 22px; }
+  .end-wrap .stamp{
+    width:74px; height:74px; border-radius:50%; margin:0 auto 16px; background:var(--accent); color:#fff;
+    display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow);
+  }
+  .end-wrap .stamp svg{ width:36px; height:36px; }
+  .end-wrap h2{ font-size:1.9rem; margin-bottom:6px; }
+  .end-wrap p{ color:var(--ink-soft); max-width:420px; margin:0 auto 22px; font-size:14.5px; }
+  .end-stats{ display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:24px; }
+  .end-stat-card{ background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:12px 16px; min-width:150px; text-align:left; }
+  .end-stat-card .pname{ font-weight:800; font-size:13.5px; margin-bottom:6px; }
+  .end-stat-card .figs{ display:flex; gap:12px; font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); }
+  .end-stat-card .figs b{ color:var(--good); }
+  .end-actions{ display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  .end-actions button{
+    padding:12px 22px; border-radius:100px; font-weight:800; font-family:var(--font-display); font-size:14px; cursor:pointer; border:1.6px solid var(--line);
+    background:var(--surface); color:var(--ink);
+  }
+  .end-actions button.primary{ background:var(--accent-ink); color:#fff; border-color:var(--accent-ink); }
+
+  .leaderboard{ margin-top:26px; max-width:420px; margin-left:auto; margin-right:auto; text-align:left; }
+  .leaderboard h3{ font-size:14px; text-align:center; color:var(--ink-soft); font-family:var(--font-mono); text-transform:uppercase; letter-spacing:.06em; margin-bottom:10px; }
+  .lb-row{ display:flex; justify-content:space-between; font-size:13px; padding:7px 4px; border-bottom:1px dashed var(--line); }
+  .lb-row span:last-child{ color:var(--ink-soft); font-family:var(--font-mono); font-size:11.5px; }
+
+  footer{ text-align:center; margin-top:40px; font-size:11.5px; color:var(--ink-soft); }
+
+  @media (prefers-reduced-motion: reduce){
+    .needle-rot{ transition-duration:.4s; }
+    .screen{ animation:none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div class="brand">
+    <span class="eyebrow">Perguntados da Fisioterapia</span>
+    <h1>Fisio<em>Game</em></h1>
+    <p>Gire o goniômetro, acerte as perguntas e complete as 6 áreas da fisioterapia antes dos seus colegas.</p>
+  </div>
+
+  <!-- ===================== SETUP ===================== -->
+  <section id="screen-setup" class="screen active">
+    <div class="setup-grid">
+      <div class="card panel">
+        <h2>Nova partida</h2>
+        <p class="sub">Configure os jogadores e comece a revisar.</p>
+
+        <div class="mode-toggle" role="tablist" aria-label="Modo de jogo">
+          <button class="mode-btn active" id="mode-multi" type="button">Multiplayer</button>
+          <button class="mode-btn" id="mode-solo" type="button">Solo (estudo)</button>
+        </div>
+
+        <div class="stepper-row" id="stepper-row">
+          <span>Jogadores</span>
+          <div class="stepper" id="stepper">
+            <button class="step-btn" data-n="2" type="button">2</button>
+            <button class="step-btn" data-n="3" type="button">3</button>
+            <button class="step-btn active" data-n="4" type="button">4</button>
+          </div>
+        </div>
+
+        <div class="name-inputs" id="name-inputs"></div>
+
+        <ul class="rules">
+          <li><b>1</b> Gire o goniômetro para sortear a área.</li>
+          <li><b>2</b> Responda em até 25s. Acertou? Some o selo da área e gire de novo.</li>
+          <li><b>3</b> Errou? A vez passa para o próximo jogador.</li>
+          <li><b>4</b> Primeiro a completar as 6 áreas recebe alta.</li>
+        </ul>
+
+        <button class="start-btn" id="start-btn" type="button">Iniciar partida</button>
+      </div>
+
+      <div class="card panel">
+        <h2>Áreas do jogo</h2>
+        <p class="sub">84 questões distribuídas nas 6 grandes áreas.</p>
+        <div class="cat-legend" id="cat-legend"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== GAME ===================== -->
+  <section id="screen-game" class="screen">
+    <div class="turn-bar" id="turn-bar" aria-live="polite">—</div>
+    <div class="hud" id="hud"></div>
+
+    <div class="stage">
+      <div class="dial-wrap" id="dial-wrap">
+        <div class="dial"></div>
+        <div class="ticks" id="ticks"></div>
+        <div class="cat-icon-wrap" id="cat-icons"></div>
+        <div class="dial-face"><span id="dial-hint">Toque em girar<br>para sortear a área</span></div>
+        <div class="needle-rot" id="needle-rot"><div class="needle-hand"></div></div>
+        <div class="pivot"></div>
+      </div>
+
+      <button class="spin-btn" id="spin-btn" type="button">🎯 Girar goniômetro</button>
+
+      <div class="card question-card" id="question-card">
+        <span class="q-cat-tag" id="q-cat-tag"><span class="dot"></span><span id="q-cat-name"></span></span>
+        <div class="timer-row">
+          <div class="timer-ring-wrap">
+            <svg viewBox="0 0 40 40">
+              <circle class="timer-ring-bg" cx="20" cy="20" r="16"></circle>
+              <circle class="timer-ring" id="timer-ring" cx="20" cy="20" r="16"></circle>
+            </svg>
+            <b id="timer-num">25</b>
+          </div>
+          <span style="font-size:12px;color:var(--ink-soft);">Responda antes que o tempo acabe</span>
+        </div>
+        <p class="q-text" id="q-text"></p>
+        <div class="options" id="options"></div>
+        <div class="explain" id="explain"><b>Nota clínica</b><span id="explain-text"></span></div>
+        <button class="continue-btn" id="continue-btn" type="button">Continuar</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== END ===================== -->
+  <section id="screen-end" class="screen">
+    <div class="card end-wrap">
+      <div class="stamp">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l6.5 2.7v5.4c0 4.6-3.2 6.9-6.5 8.3-3.3-1.4-6.5-3.7-6.5-8.3V5.9L12 3.2z"/><path d="m9 12 2 2 4-4"/></svg>
+      </div>
+      <h2 id="end-title">Vencedor</h2>
+      <p id="end-sub">Completou as 6 áreas do FisioGame.</p>
+      <div class="end-stats" id="end-stats"></div>
+      <div class="end-actions">
+        <button class="primary" id="play-again-btn" type="button">Jogar novamente</button>
+        <button id="new-setup-btn" type="button">Nova configuração</button>
+      </div>
+      <div class="leaderboard" id="leaderboard-wrap">
+        <h3>Últimas altas concedidas</h3>
+        <div id="leaderboard"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>FisioGame — feito para estudantes de fisioterapia revisarem conteúdo de forma lúdica.</footer>
+</div>
+
+<script>
+/* ===================== dados ===================== */
+const CATEGORIES = [
+  { id:"anatomia", name:"Anatomia", color:"var(--cat-anatomia)",
+    icon:'<g fill="currentColor"><rect x="9" y="4" width="6" height="16" rx="3"/><circle cx="7.4" cy="4" r="2.6"/><circle cx="16.6" cy="4" r="2.6"/><circle cx="7.4" cy="20" r="2.6"/><circle cx="16.6" cy="20" r="2.6"/></g>' },
+  { id:"cinesio", name:"Cinesiologia & Biomecânica", color:"var(--cat-cinesio)",
+    icon:'<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20 L5 5"/><path d="M5 20 L19 20"/><path d="M5 13 A7 7 0 0 1 11.5 20"/></g>' },
+  { id:"orto", name:"Ortopedia & Traumatologia", color:"var(--cat-orto)",
+    icon:'<g><rect x="9" y="4" width="6" height="16" rx="3" fill="currentColor"/><path d="M9 9 L13 12 L10 13 L15 17" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>' },
+  { id:"neuro", name:"Neurologia", color:"var(--cat-neuro)",
+    icon:'<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.3c-2.4 0-3.9 1.9-3.9 3.8-1.4.5-1.9 2-1.2 3.2-1 1-.7 2.9 1 3.6 0 1.9 1.7 2.9 3.2 2.4.8 1 2.4 1 2.9-.3 1.7.6 3.4-.5 3.4-2.1 1.6-.3 2.4-2 1.6-3.4 1-1 .5-2.9-1-3.2.2-1.9-1.3-3.8-3.4-3.8-.5-1.3-2-2.1-3.6-1.8"/><path d="M12 5.2v13.6"/></g>' },
+  { id:"cardio", name:"Cardiorrespiratória", color:"var(--cat-cardio)",
+    icon:'<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19.5C4.8 13.8 3 9.3 6 6.7 8.3 4.9 11 6.1 12 8.4 13 6.1 15.7 4.9 18 6.7c3 2.6 1.2 7.1-6 12.8z"/><path d="M4.3 12.6h3.4l1.3-2.6 1.7 4.3 1.3-2.6h5.7" stroke-width="1.5"/></g>' },
+  { id:"saude", name:"Saúde Coletiva, Ética & UTI", color:"var(--cat-saude)",
+    icon:'<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l6.5 2.7v5.4c0 4.6-3.2 6.9-6.5 8.3-3.3-1.4-6.5-3.7-6.5-8.3V5.9L12 3.2z"/><path d="M12 8.4v7M8.5 11.9h7"/></g>' }
+];
+
+const QUESTIONS = {
+  anatomia: [
+    { q:"Quantos ossos compõem o esqueleto humano adulto, em média?", a:["206","196","186","216"], c:0,
+      e:"O esqueleto adulto tem 206 ossos; o recém-nascido tem cerca de 270 a 300, que se fundem com o crescimento." },
+    { q:"Qual músculo é popularmente chamado de \"músculo do alfaiate\" por atravessar obliquamente a coxa?", a:["Reto femoral","Grácil","Bíceps femoral","Sartório"], c:3,
+      e:"O sartório é o músculo mais longo do corpo e cruza a coxa do quadril ao joelho, auxiliando a posição de pernas cruzadas." },
+    { q:"A articulação do ombro (glenoumeral) é classificada como:", a:["Gínglimo","Selar","Esferóidea (bola e soquete)","Plana"], c:2,
+      e:"É uma articulação esferóidea, a mais móvel do corpo — o que também a torna mais instável." },
+    { q:"O nervo isquiático (ciático) é formado principalmente pelas raízes:", a:["T12-L3","L1-L4","L4-S3","S2-S5"], c:2,
+      e:"O nervo isquiático origina-se do plexo sacral, raízes L4 a S3, sendo o maior nervo do corpo humano." },
+    { q:"O movimento que afasta um segmento corporal da linha média é chamado de:", a:["Circundução","Abdução","Rotação","Adução"], c:1,
+      e:"Abdução é o movimento de afastamento da linha média; adução é o movimento oposto, de aproximação." },
+    { q:"Qual é o maior e mais forte osso do corpo humano?", a:["Úmero","Fêmur","Tíbia","Ílio"], c:1,
+      e:"O fêmur é o osso mais longo e resistente, suportando grande parte do peso corporal na posição em pé." },
+    { q:"O músculo quadríceps femoral é formado por quantas porções (ventres musculares)?", a:["3","2","4","5"], c:2,
+      e:"É composto por reto femoral, vasto lateral, vasto medial e vasto intermédio, unidos no tendão patelar." },
+    { q:"O plano anatômico que divide o corpo em partes anterior e posterior é o plano:", a:["Transverso","Frontal (coronal)","Oblíquo","Sagital"], c:1,
+      e:"O plano frontal separa anterior de posterior; o sagital separa direita/esquerda; o transverso, superior/inferior." },
+    { q:"A patela é classificada, quanto à forma, como um osso:", a:["Curto","Sesamoide","Irregular","Longo"], c:1,
+      e:"A patela é o maior osso sesamoide do corpo, formado dentro do tendão do quadríceps." },
+    { q:"O manguito rotador do ombro é formado por quantos músculos?", a:["2","3","5","4"], c:3,
+      e:"Supraespinhal, infraespinhal, redondo menor e subescapular compõem o manguito rotador (mnemônico SITS)." },
+    { q:"A cabeça longa do bíceps braquial origina-se em qual estrutura da escápula?", a:["Tubérculo supraglenoidal","Acrômio","Fossa infraespinhal","Processo coracoide"], c:0,
+      e:"A cabeça longa origina-se no tubérculo supraglenoidal; a cabeça curta, no processo coracoide." },
+    { q:"Quantas vértebras compõem a coluna cervical?", a:["5","7","12","9"], c:1,
+      e:"A coluna cervical possui 7 vértebras (C1 a C7); C1 (atlas) e C2 (áxis) são especializadas na rotação da cabeça." },
+    { q:"O nervo mediano é responsável principalmente pela inervação motora de qual compartimento do antebraço?", a:["Posterior (extensor)","É puramente sensitivo","Lateral","Anterior (flexor)"], c:3,
+      e:"O nervo mediano inerva a maior parte da musculatura flexora anterior, exceto parte do flexor profundo dos dedos e o flexor ulnar do carpo." },
+    { q:"O ligamento cruzado anterior (LCA) do joelho tem como principal função impedir:", a:["A translação posterior da tíbia","A translação anterior da tíbia","A flexão do joelho","A rotação externa do fêmur"], c:1,
+      e:"O LCA restringe principalmente o deslizamento anterior excessivo da tíbia em relação ao fêmur." }
+  ],
+  cinesio: [
+    { q:"Tipo de contração muscular em que o músculo se encurta enquanto gera tensão:", a:["Excêntrica","Concêntrica","Isocinética","Isométrica"], c:1,
+      e:"Na contração concêntrica o músculo encurta e vence a resistência — ex.: fase de subida do agachamento." },
+    { q:"Tipo de contração em que o músculo se alonga enquanto ainda produz tensão:", a:["Excêntrica","Isométrica","Concêntrica","Isotônica pura"], c:0,
+      e:"Na contração excêntrica o músculo é alongado sob carga — é a fase que mais gera microlesão e é usada em protocolos de fortalecimento tendíneo." },
+    { q:"Contração em que não há alteração aparente no comprimento do músculo:", a:["Excêntrica","Isométrica","Concêntrica","Pliométrica"], c:1,
+      e:"Na contração isométrica há geração de tensão sem mudança de comprimento nem movimento articular visível." },
+    { q:"O que o goniômetro é utilizado para medir na avaliação fisioterapêutica?", a:["Frequência cardíaca","Amplitude de movimento articular","Equilíbrio","Força muscular"], c:1,
+      e:"O goniômetro mede a amplitude de movimento (ADM) articular em graus, comparando ao lado contralateral ou a valores normativos." },
+    { q:"As alavancas mais frequentemente encontradas no corpo humano são de que classe?", a:["Quarta classe","Terceira classe","Primeira classe","Segunda classe"], c:1,
+      e:"A maioria das alavancas corporais é de terceira classe (força aplicada entre eixo e resistência), priorizando velocidade sobre força." },
+    { q:"Torque (momento de força) é o produto da força aplicada pelo(a):", a:["Massa do segmento","Tempo de aplicação","Braço de momento (distância perpendicular ao eixo)","Velocidade angular"], c:2,
+      e:"Torque = Força x braço de momento, a distância perpendicular entre a linha de ação da força e o eixo de rotação." },
+    { q:"A ação principal do tríceps sural (gastrocnêmio + sóleo) na articulação do tornozelo é:", a:["Flexão plantar","Eversão","Dorsiflexão","Inversão"], c:0,
+      e:"O tríceps sural é o principal flexor plantar do tornozelo, essencial na fase de propulsão da marcha." },
+    { q:"Cadeia cinética em que o segmento distal do membro está fixo (ex.: agachamento) é chamada:", a:["Cadeia cinética mista","Cadeia cinética livre","Cadeia cinética aberta","Cadeia cinética fechada"], c:3,
+      e:"Na cadeia cinética fechada a extremidade distal está fixa, favorecendo maior estabilidade articular." },
+    { q:"Cadeia cinética em que o segmento distal se move livremente (ex.: chute) é chamada:", a:["Cadeia cinética estática","Cadeia cinética fechada","Cadeia cinética aberta","Cadeia cinética combinada"], c:2,
+      e:"Na cadeia cinética aberta a extremidade distal se move livremente no espaço, sem apoio fixo." },
+    { q:"O ligamento cruzado posterior (LCP) do joelho impede principalmente:", a:["A translação posterior da tíbia","A hiperextensão do quadril","A abdução do joelho","A translação anterior da tíbia"], c:0,
+      e:"O LCP é o principal estabilizador contra o deslocamento posterior da tíbia em relação ao fêmur." },
+    { q:"A membrana de tecido conjuntivo que envolve todo o músculo, externamente, é chamada de:", a:["Endomísio","Sarcolema","Perimísio","Epimísio"], c:3,
+      e:"O epimísio envolve o músculo inteiro; o perimísio envolve fascículos; o endomísio envolve cada fibra individual." },
+    { q:"Na marcha normal, a fase de apoio representa aproximadamente qual porcentagem do ciclo?", a:["80%","20%","60%","40%"], c:2,
+      e:"A fase de apoio corresponde a cerca de 60% do ciclo da marcha, e a fase de balanço a cerca de 40%." },
+    { q:"Em pé, o centro de gravidade corporal está localizado aproximadamente à frente de qual vértebra?", a:["C7","S2","L3","T12"], c:1,
+      e:"O centro de gravidade situa-se, em média, ligeiramente anterior à segunda vértebra sacral (S2)." },
+    { q:"O que caracteriza uma contração pliométrica (ciclo alongamento-encurtamento)?", a:["Isometria prolongada","Fase excêntrica rápida seguida de concêntrica explosiva","Apenas contração concêntrica lenta","Ausência de ativação muscular"], c:1,
+      e:"O ciclo alongamento-encurtamento usa uma fase excêntrica rápida que armazena energia elástica, liberada numa fase concêntrica explosiva." }
+  ],
+  orto: [
+    { q:"Uma fratura em que o osso se rompe em múltiplos fragmentos é classificada como:", a:["Cominutiva","Transversa","Espiral","Em galho verde"], c:0,
+      e:"A fratura cominutiva apresenta três ou mais fragmentos ósseos, geralmente por trauma de alta energia." },
+    { q:"A fratura de Colles, comum em idosos após queda com a mão espalmada, ocorre em qual região?", a:["Colo do fêmur","Extremidade distal do rádio","Clavícula","Diáfise da tíbia"], c:1,
+      e:"A fratura de Colles é uma fratura da extremidade distal do rádio com desvio dorsal, típica de quedas sobre a mão estendida." },
+    { q:"O tempo médio de consolidação de uma fratura em osso longo de adulto é de aproximadamente:", a:["6-8 semanas","1-2 semanas","2 anos","6 meses"], c:0,
+      e:"A consolidação óssea primária em adultos leva, em média, 6 a 8 semanas, variando conforme o osso e fatores individuais." },
+    { q:"A síndrome do impacto subacromial do ombro está diretamente relacionada ao comprometimento de qual estrutura?", a:["Nervo axilar","Manguito rotador","Cápsula posterior","Ligamento coracoumeral apenas"], c:1,
+      e:"O impacto subacromial comprime os tendões do manguito rotador (principalmente supraespinhal) contra o acrômio." },
+    { q:"Qual teste especial é clássico para avaliar a integridade do ligamento cruzado anterior?", a:["Teste de Lachman","Teste de Thomas","Sinal de Tinel","Teste de Ober"], c:0,
+      e:"O teste de Lachman avalia a translação anterior da tíbia e é considerado o teste mais sensível para lesão do LCA." },
+    { q:"A epicondilite lateral do cotovelo é popularmente conhecida como:", a:["Cotovelo de tenista","Cotovelo de golfista","Ombro congelado","Dedo em gatilho"], c:0,
+      e:"A epicondilite lateral acomete os tendões extensores do punho na origem do epicôndilo lateral." },
+    { q:"A escoliose é definida como um desvio da coluna vertebral principalmente no plano:", a:["Nenhum, é apenas rotacional","Transverso","Frontal (lateral)","Sagital"], c:2,
+      e:"A escoliose envolve curvatura lateral no plano frontal, geralmente associada a rotação vertebral." },
+    { q:"A substituição cirúrgica total da articulação do quadril é chamada de:", a:["Osteotomia","Artroplastia total de quadril","Artrodese","Artroscopia"], c:1,
+      e:"A artroplastia total de quadril substitui as superfícies articulares danificadas por componentes protéticos." },
+    { q:"A luxação glenoumeral (do ombro) ocorre com mais frequência em qual direção?", a:["Inferior pura","Superior","Posterior","Anterior"], c:3,
+      e:"Cerca de 90-95% das luxações de ombro são anteriores, geralmente por trauma em abdução, rotação externa e extensão." },
+    { q:"A síndrome do túnel do carpo resulta da compressão de qual nervo ao nível do punho?", a:["Nervo mediano","Nervo radial","Nervo musculocutâneo","Nervo ulnar"], c:0,
+      e:"O nervo mediano é comprimido dentro do túnel do carpo, causando dor e parestesia nos primeiros dedos da mão." },
+    { q:"O teste de McMurray é utilizado para avaliar lesão em qual estrutura do joelho?", a:["Menisco","Bursa suprapatelar","Ligamento colateral medial","Tendão patelar"], c:0,
+      e:"O teste de McMurray combina flexão, rotação e extensão do joelho para detectar lesões meniscais." },
+    { q:"A conduta PRICE em lesões musculoesqueléticas agudas inclui proteção, repouso, gelo, compressão e:", a:["Exercício resistido","Elevação","Estiramento","Estimulação elétrica"], c:1,
+      e:"PRICE = Proteção, Repouso, Gelo (Ice), Compressão e Elevação, usados nas primeiras 48-72h após lesão aguda." },
+    { q:"A osteoartrose é caracterizada principalmente pela degeneração progressiva de qual estrutura articular?", a:["Apenas o menisco","Apenas a sinóvia","Cápsula articular","Cartilagem articular"], c:3,
+      e:"A osteoartrose envolve degeneração da cartilagem articular hialina, com formação de osteófitos e esclerose subcondral." },
+    { q:"Fraturas de estresse são tipicamente associadas a qual tipo de mecanismo?", a:["Infecção óssea","Trauma único de alta energia","Microtraumas repetitivos por sobrecarga","Osteoporose isoladamente"], c:2,
+      e:"As fraturas de estresse resultam do acúmulo de microtraumas por carga repetitiva, comuns em corredores e atletas." }
+  ],
+  neuro: [
+    { q:"Qual escala é amplamente utilizada para avaliar o nível de consciência de um paciente?", a:["Escala de Borg","Escala de Berg","Escala de Ashworth","Escala de Coma de Glasgow"], c:3,
+      e:"A Escala de Coma de Glasgow avalia abertura ocular, resposta verbal e resposta motora, pontuando de 3 a 15." },
+    { q:"O acidente vascular cerebral isquêmico é causado principalmente por:", a:["Infecção do SNC","Trauma cranioencefálico","Ruptura de um vaso cerebral","Obstrução de um vaso sanguíneo cerebral"], c:3,
+      e:"No AVC isquêmico há oclusão (trombótica ou embólica) de um vaso, reduzindo o fluxo sanguíneo cerebral numa região." },
+    { q:"O termo hemiplegia refere-se à:", a:["Paralisia apenas dos membros inferiores","Paralisia dos quatro membros","Fraqueza leve unilateral","Paralisia de metade do corpo"], c:3,
+      e:"Hemiplegia é a paralisia completa de um lado do corpo, geralmente por lesão do neurônio motor superior contralateral." },
+    { q:"Uma lesão medular completa acima do nível C4 compromete gravemente principalmente qual função vital?", a:["Circulação periférica","Digestão","Respiração","Visão"], c:2,
+      e:"Lesões acima de C4 comprometem o nervo frênico, que inerva o diafragma, podendo exigir suporte ventilatório." },
+    { q:"A Escala de Ashworth Modificada é utilizada clinicamente para avaliar:", a:["Sensibilidade","Equilíbrio","Espasticidade","Força muscular"], c:2,
+      e:"A Escala de Ashworth Modificada graua a resistência ao movimento passivo, refletindo o grau de espasticidade." },
+    { q:"A doença de Parkinson está classicamente associada à deficiência de qual neurotransmissor?", a:["Serotonina","GABA","Dopamina","Acetilcolina"], c:2,
+      e:"A degeneração de neurônios dopaminérgicos da substância negra reduz a dopamina, causando os sintomas motores do Parkinson." },
+    { q:"A paralisia cerebral tem origem em uma lesão não progressiva ocorrida em qual período?", a:["Exclusivamente durante o parto","No cérebro em desenvolvimento (pré, peri ou pós-natal precoce)","Após os 5 anos de idade","Apenas na vida adulta"], c:1,
+      e:"A paralisia cerebral resulta de lesão não progressiva no encéfalo ainda em desenvolvimento, pré-natal, perinatal ou pós-natal precoce." },
+    { q:"O que a Escala de Equilíbrio de Berg avalia principalmente?", a:["Nível de consciência","Capacidade cardiorrespiratória","Equilíbrio funcional","Força de preensão manual"], c:2,
+      e:"A Escala de Berg avalia o equilíbrio funcional por meio de 14 tarefas, muito usada em idosos e pacientes neurológicos." },
+    { q:"A síndrome de Guillain-Barré afeta principalmente qual componente do sistema nervoso?", a:["Nervos periféricos","Apenas os nervos cranianos","Sistema nervoso central exclusivamente","Apenas a medula óssea"], c:0,
+      e:"É uma polirradiculoneuropatia autoimune que afeta os nervos periféricos, causando fraqueza muscular ascendente." },
+    { q:"O reflexo patelar avalia a integridade de qual nível medular aproximado?", a:["C5-C6","L3-L4","S1-S2","T10-T12"], c:1,
+      e:"O reflexo patelar corresponde predominantemente às raízes L3-L4, útil na avaliação neurológica de membros inferiores." },
+    { q:"A ataxia cerebelar caracteriza-se principalmente pela perda de:", a:["Força muscular pura","Memória recente","Sensibilidade tátil","Coordenação motora e equilíbrio"], c:3,
+      e:"Lesões cerebelares comprometem coordenação, equilíbrio e precisão dos movimentos voluntários (dismetria, marcha atáxica)." },
+    { q:"Uma hemiparesia à direita geralmente indica lesão localizada em qual hemisfério cerebral?", a:["Medula espinhal cervical","Direito","Esquerdo","Cerebelo apenas"], c:2,
+      e:"Devido à decussação das vias motoras, lesões no hemisfério esquerdo geralmente causam déficits motores à direita." },
+    { q:"A técnica de facilitação neuromuscular proprioceptiva é conhecida pela sigla:", a:["FNP (ou PNF)","TENS","RPG","RPM"], c:0,
+      e:"FNP (ou PNF, em inglês) usa padrões diagonais de movimento e estímulos proprioceptivos." },
+    { q:"O conceito Bobath é utilizado principalmente na reabilitação de pacientes com:", a:["Doenças respiratórias","Fraturas ortopédicas simples","Lesões tendíneas isoladas","Lesões do neurônio motor superior (AVC, paralisia cerebral)"], c:3,
+      e:"O conceito Bobath é voltado ao manejo de alterações do tônus e do controle motor em lesões do neurônio motor superior." }
+  ],
+  cardio: [
+    { q:"Qual o nome do volume de ar mobilizado durante uma respiração normal e tranquila?", a:["Capacidade vital","Volume residual","Volume corrente","Volume de reserva inspiratório"], c:2,
+      e:"O volume corrente é o volume inspirado e expirado em cada ciclo respiratório normal, em repouso (~500 mL em adultos)." },
+    { q:"A sigla DPOC refere-se a qual condição respiratória?", a:["Deficiência Pulmonar de Oxigênio Crônica","Doença Pleural Obstrutiva Congênita","Doença Pulmonar Obstrutiva Crônica","Distúrbio Pulmonar Ocupacional Crônico"], c:2,
+      e:"DPOC engloba principalmente bronquite crônica e enfisema, com obstrução progressiva e pouco reversível do fluxo aéreo." },
+    { q:"Ausculta pulmonar com ruídos crepitantes finos, descritos como tipo velcro, sugere principalmente:", a:["Fibrose pulmonar","Pneumotórax","Asma","Derrame pleural volumoso"], c:0,
+      e:"Os crepitantes tipo velcro, teleinspiratórios e bibasais, são achado clássico de fibrose pulmonar intersticial." },
+    { q:"Qual manobra é frequentemente utilizada para promover a reexpansão pulmonar no pós-operatório?", a:["Inspirometria de incentivo","Tapotagem","Drenagem postural exclusiva","Manobra de Heimlich"], c:0,
+      e:"A inspirometria de incentivo estimula inspirações profundas e sustentadas, prevenindo atelectasias pós-cirúrgicas." },
+    { q:"Qual escala é comumente usada para avaliar a percepção subjetiva de esforço ou dispneia no exercício?", a:["Escala de Katz","Escala de Borg","Escala de Braden","Escala de Glasgow"], c:1,
+      e:"A Escala de Borg (ou sua versão CR-10) quantifica subjetivamente a intensidade percebida do esforço ou falta de ar." },
+    { q:"Em ventilação mecânica, a sigla PEEP refere-se a:", a:["Pressão expiratória positiva final","Padrão espirométrico de esforço","Pressão de entrada de emergência pulmonar","Pico de esforço expiratório"], c:0,
+      e:"PEEP mantém uma pressão positiva residual nos pulmões ao final da expiração, evitando colapso alveolar." },
+    { q:"A frequência respiratória considerada normal em adulto saudável em repouso é de aproximadamente:", a:["4-8 rpm","12-20 rpm","50-60 rpm","30-40 rpm"], c:1,
+      e:"A frequência respiratória normal de repouso em adultos situa-se entre 12 e 20 respirações por minuto." },
+    { q:"O teste de caminhada de 6 minutos é utilizado principalmente para avaliar:", a:["Capacidade funcional cardiorrespiratória","Força de membros superiores","Amplitude de movimento do quadril","Equilíbrio estático"], c:0,
+      e:"O TC6 mede a distância percorrida em 6 minutos, refletindo a capacidade funcional e a resposta cardiorrespiratória ao esforço." },
+    { q:"A fase 1 da reabilitação cardíaca ocorre tipicamente em qual contexto?", a:["Em casa, sem supervisão","Em academias comuns","Apenas via telemedicina","Durante a internação hospitalar"], c:3,
+      e:"A fase 1 da reabilitação cardíaca é hospitalar, iniciada ainda durante a internação, com mobilização progressiva e monitorada." },
+    { q:"A presença de cianose (coloração azulada de pele e mucosas) geralmente indica:", a:["Hipoglicemia","Hipertermia","Retenção hídrica","Baixa saturação de oxigênio no sangue"], c:3,
+      e:"A cianose reflete níveis elevados de hemoglobina desoxigenada no sangue, associada a hipoxemia." },
+    { q:"A manobra de Heimlich é indicada em casos de:", a:["Hiperventilação ansiosa","Parada cardíaca","Crise asmática leve","Obstrução de vias aéreas por corpo estranho"], c:3,
+      e:"A manobra de Heimlich (compressões abdominais subdiafragmáticas) é usada para desobstruir vias aéreas em engasgo." },
+    { q:"O VO2 máximo representa:", a:["A frequência cardíaca máxima","O consumo máximo de oxigênio durante esforço","O volume corrente máximo","A capacidade pulmonar total"], c:1,
+      e:"O VO2 máx é o maior volume de oxigênio que o organismo consegue captar e utilizar em esforço crescente." },
+    { q:"A insuficiência cardíaca com fração de ejeção reduzida costuma ser classificada pela sigla:", a:["IAM","ICFEp","AVE","ICFEr"], c:3,
+      e:"ICFEr indica falha predominante na função sistólica do ventrículo." },
+    { q:"A ventilação não invasiva (VNI) utiliza tipicamente qual tipo de interface com o paciente?", a:["Cateter central","Tubo orotraqueal","Máscara facial ou nasal","Cânula de traqueostomia"], c:2,
+      e:"A VNI oferece suporte ventilatório por máscaras, sem necessidade de via aérea artificial invasiva." }
+  ],
+  saude: [
+    { q:"O Código de Ética da Fisioterapia no Brasil é regulamentado por qual órgão de classe?", a:["CREFITO regional apenas","CFM","ANVISA","COFFITO"], c:3,
+      e:"O COFFITO (Conselho Federal de Fisioterapia e Terapia Ocupacional) regulamenta o Código de Ética da profissão." },
+    { q:"Qual sigla representa o sistema público e universal de saúde do Brasil?", a:["SUS","INSS","SUAS","ANS"], c:0,
+      e:"O SUS é o sistema público brasileiro que garante acesso universal e gratuito aos serviços de saúde." },
+    { q:"Em UTI, qual escala é frequentemente utilizada para avaliar o nível de sedação/agitação do paciente?", a:["Escala de Berg","Escala de Braden","Índice de Barthel","RASS"], c:3,
+      e:"A RASS avalia o grau de sedação ou agitação do paciente crítico, orientando a conduta terapêutica." },
+    { q:"A mobilização precoce em pacientes de UTI tem como um dos principais objetivos prevenir:", a:["Alergias medicamentosas","Hipertensão arterial","Infecção urinária","A fraqueza muscular adquirida na UTI"], c:3,
+      e:"A mobilização precoce reduz o descondicionamento e a fraqueza muscular adquirida na UTI." },
+    { q:"Antes de manipular um paciente entubado sob ventilação mecânica, o fisioterapeuta deve verificar prioritariamente:", a:["O horário de visita da família","A cor da roupa do paciente","O tipo sanguíneo","A estabilidade hemodinâmica e os parâmetros vitais"], c:3,
+      e:"A checagem dos parâmetros hemodinâmicos e ventilatórios é essencial antes de qualquer manuseio em paciente crítico." },
+    { q:"O documento que registra a evolução clínica e as condutas realizadas com o paciente é chamado de:", a:["Receituário","Termo de consentimento","Prontuário","Anamnese apenas"], c:2,
+      e:"O prontuário reúne todo o histórico, avaliações e evoluções do paciente, sendo documento legal obrigatório." },
+    { q:"Antes de aplicar qualquer conduta fisioterapêutica, é eticamente obrigatório obter do paciente (ou responsável):", a:["Comprovante de renda","Comprovante de residência","Consentimento informado","Atestado médico prévio"], c:2,
+      e:"O consentimento informado garante que o paciente compreenda e concorde com a conduta proposta, respeitando sua autonomia." },
+    { q:"A Norma Regulamentadora NR-32 trata principalmente de:", a:["Ergonomia no escritório","Transporte de cargas pesadas","Vigilância sanitária de alimentos","Segurança e saúde no trabalho em serviços de saúde"], c:3,
+      e:"A NR-32 estabelece diretrizes de proteção à segurança e saúde dos trabalhadores em serviços de saúde." },
+    { q:"As precauções padrão em ambiente hospitalar exigem obrigatoriamente o uso de:", a:["Equipamentos de proteção individual (EPIs)","Uniforme colorido","Óculos de grau","Perfume neutro"], c:0,
+      e:"As precauções padrão determinam o uso de EPIs na assistência a qualquer paciente, reduzindo risco de contaminação cruzada." },
+    { q:"A Classificação Internacional de Funcionalidade (CIF) avalia o indivíduo considerando quais domínios principais?", a:["Apenas fatores genéticos","Somente aspectos financeiros","Estruturas/funções do corpo, atividade, participação e fatores contextuais","Apenas diagnóstico médico"], c:2,
+      e:"A CIF adota um modelo biopsicossocial: funções e estruturas do corpo, atividades, participação social e fatores contextuais." },
+    { q:"O dever de sigilo profissional do fisioterapeuta em relação às informações do paciente está previsto:", a:["Não existe previsão formal","Somente por decisão do empregador","No Código de Ética Profissional da Fisioterapia","Apenas em acordos informais"], c:2,
+      e:"O sigilo profissional é um dever ético formalmente previsto no Código de Ética da Fisioterapia." },
+    { q:"A prática da fisioterapia baseada em evidências prioriza decisões clínicas fundamentadas principalmente em:", a:["Preferência exclusiva do profissional","Tradição da prática clínica apenas","Melhor evidência científica, experiência clínica e valores do paciente","Custo do tratamento apenas"], c:2,
+      e:"A prática baseada em evidências integra a melhor evidência científica, a expertise clínica e os valores do paciente." },
+    { q:"A sigla PAV, no contexto de terapia intensiva, refere-se a:", a:["Pneumonia Associada à Ventilação mecânica","Padrão de Avaliação Vital","Protocolo de Alta Voluntária","Pressão Arterial Venosa"], c:0,
+      e:"PAV é uma infecção pulmonar que pode ocorrer em pacientes sob ventilação mecânica invasiva prolongada." },
+    { q:"Durante o estágio supervisionado, o aluno de fisioterapia deve atuar sob supervisão direta de:", a:["Um fisioterapeuta preceptor/docente responsável","Colegas de turma apenas","Apenas da coordenação administrativa","Nenhuma supervisão é necessária"], c:0,
+      e:"O estágio supervisionado exige acompanhamento de um preceptor ou docente responsável, garantindo segurança ao paciente." }
+  ]
+};
+
+/* ===================== utilidades ===================== */
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+function $(sel){ return document.querySelector(sel); }
+function el(tag, cls){ const e=document.createElement(tag); if(cls) e.className=cls; return e; }
+
+/* ===================== estado ===================== */
+const QUESTION_TIME = 25;
+const TIMER_R = 16;
+const TIMER_CIRC = 2*Math.PI*TIMER_R;
+
+const state = {
+  mode:"multi",
+  playerCount:4,
+  players:[],
+  current:0,
+  pool:{},
+  activeCatIndex:null,
+  currentQuestion:null,
+  timerInt:null,
+  timeLeft:0,
+  answered:false,
+  lastCorrect:false,
+  needleRotation:0,
+  spinning:false
+};
+
+/* ===================== setup screen ===================== */
+function renderCatLegend(){
+  const wrap = $("#cat-legend");
+  wrap.innerHTML = "";
+  CATEGORIES.forEach(cat=>{
+    const row = el("div","cat-row");
+    row.innerHTML =
+      '<div class="cat-swatch" style="background:'+cat.color+'"><svg viewBox="0 0 24 24">'+cat.icon+'</svg></div>'+
+      '<span class="name">'+cat.name+'</span>'+
+      '<span class="count">'+QUESTIONS[cat.id].length+' questões</span>';
+    wrap.appendChild(row);
+  });
+}
+
+function renderNameInputs(){
+  const wrap = $("#name-inputs");
+  wrap.innerHTML = "";
+  const n = state.mode==="solo" ? 1 : state.playerCount;
+  for(let i=0;i<n;i++){
+    const input = document.createElement("input");
+    input.type="text";
+    input.maxLength=18;
+    input.id="name-"+i;
+    input.placeholder = state.mode==="solo" ? "Seu nome (opcional)" : "Jogador "+(i+1);
+    wrap.appendChild(input);
+  }
+}
+
+$("#mode-multi").addEventListener("click",()=>{
+  state.mode="multi";
+  $("#mode-multi").classList.add("active");
+  $("#mode-solo").classList.remove("active");
+  $("#stepper-row").style.display="flex";
+  renderNameInputs();
+});
+$("#mode-solo").addEventListener("click",()=>{
+  state.mode="solo";
+  $("#mode-solo").classList.add("active");
+  $("#mode-multi").classList.remove("active");
+  $("#stepper-row").style.display="none";
+  renderNameInputs();
+});
+document.querySelectorAll(".step-btn").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    document.querySelectorAll(".step-btn").forEach(b=>b.classList.remove("active"));
+    btn.classList.add("active");
+    state.playerCount = parseInt(btn.dataset.n,10);
+    renderNameInputs();
+  });
+});
+
+function showScreen(id){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  $("#screen-"+id).classList.add("active");
+}
+
+$("#start-btn").addEventListener("click", startGame);
+
+function startGame(){
+  const n = state.mode==="solo" ? 1 : state.playerCount;
+  const players=[];
+  for(let i=0;i<n;i++){
+    const input = $("#name-"+i);
+    let name = input ? input.value.trim() : "";
+    if(!name) name = state.mode==="solo" ? "Você" : "Jogador "+(i+1);
+    players.push({ name:name, tokens:[], correct:0, wrong:0 });
+  }
+  state.players = players;
+  state.current = 0;
+  state.pool = {};
+  state.needleRotation = 0;
+  buildDial();
+  buildHud();
+  updateTurnBar();
+  hideQuestionCard();
+  showScreen("game");
+}
+
+/* ===================== goniometer dial ===================== */
+function buildDial(){
+  const ticksWrap = $("#ticks");
+  ticksWrap.innerHTML = "";
+  for(let d=0; d<360; d+=10){
+    const t = el("div","tick"+(d%60===0?" major":""));
+    t.style.transform = "rotate("+d+"deg)";
+    t.innerHTML = "<i></i>";
+    ticksWrap.appendChild(t);
+  }
+  const iconsWrap = $("#cat-icons");
+  iconsWrap.innerHTML = "";
+  CATEGORIES.forEach((cat,i)=>{
+    const wrap = el("div");
+    wrap.style.position="absolute"; wrap.style.inset="0";
+    wrap.style.transform = "rotate("+(i*60)+"deg)";
+    const icon = el("div","cat-icon");
+    icon.style.transform = "rotate("+(-i*60)+"deg)";
+    icon.innerHTML = '<svg viewBox="0 0 24 24">'+cat.icon+'</svg>';
+    wrap.appendChild(icon);
+    iconsWrap.appendChild(wrap);
+  });
+  $("#needle-rot").style.setProperty("--rot","0deg");
+}
+
+function spinTo(catIndex){
+  const targetMod = catIndex*60;
+  const base = state.needleRotation - (state.needleRotation % 360);
+  let next = base + 360*5 + targetMod;
+  if(next <= state.needleRotation) next += 360;
+  state.needleRotation = next;
+  $("#needle-rot").style.setProperty("--rot", next+"deg");
+}
+
+$("#spin-btn").addEventListener("click", ()=>{
+  if(state.spinning) return;
+  state.spinning = true;
+  $("#spin-btn").disabled = true;
+  $("#dial-hint").textContent = "Girando...";
+  hideQuestionCard();
+  const player = state.players[state.current];
+  const catIndex = pickCategoryIndex(player);
+  spinTo(catIndex);
+  setTimeout(()=>{
+    state.spinning = false;
+    revealCategory(catIndex);
+  }, 3200);
+});
+
+function pickCategoryIndex(player){
+  const weights = CATEGORIES.map(cat => player.tokens.includes(cat.id) ? 1 : 3);
+  const total = weights.reduce((a,b)=>a+b,0);
+  let r = Math.random()*total;
+  for(let i=0;i<weights.length;i++){
+    if(r < weights[i]) return i;
+    r -= weights[i];
+  }
+  return weights.length-1;
+}
+
+/* ===================== perguntas ===================== */
+function ensurePool(catId){
+  if(!state.pool[catId] || state.pool[catId].length===0){
+    const idxs=[...Array(QUESTIONS[catId].length).keys()];
+    shuffle(idxs);
+    state.pool[catId]=idxs;
+  }
+}
+function drawQuestion(catId){
+  ensurePool(catId);
+  const idx = state.pool[catId].pop();
+  const base = QUESTIONS[catId][idx];
+  return { q:base.q, a:base.a, c:base.c, e:base.e, catId:catId };
+}
+
+function revealCategory(catIndex){
+  state.activeCatIndex = catIndex;
+  const cat = CATEGORIES[catIndex];
+  $("#dial-hint").innerHTML = cat.name.split(" & ").join("<br>&");
+  const q = drawQuestion(cat.id);
+  state.currentQuestion = q;
+  showQuestion(cat, q);
+}
+
+function showQuestion(cat, q){
+  state.answered = false;
+  const tag = $("#q-cat-tag");
+  tag.style.background = cat.color;
+  $("#q-cat-name").textContent = cat.name;
+  $("#q-text").textContent = q.q;
+
+  const optWrap = $("#options");
+  optWrap.innerHTML = "";
+  const letters = ["A","B","C","D"];
+  q.a.forEach((opt,i)=>{
+    const btn = el("button","opt-btn");
+    btn.type="button";
+    btn.innerHTML = '<span class="letter">'+letters[i]+'</span><span>'+opt+'</span>';
+    btn.addEventListener("click", ()=>selectAnswer(i));
+    optWrap.appendChild(btn);
+  });
+
+  $("#explain").classList.remove("show");
+  $("#continue-btn").classList.remove("show");
+  $("#question-card").classList.add("show");
+
+  startTimer();
+}
+
+function hideQuestionCard(){
+  $("#question-card").classList.remove("show");
+  clearInterval(state.timerInt);
+}
+
+function startTimer(){
+  clearInterval(state.timerInt);
+  state.timeLeft = QUESTION_TIME;
+  const ring = $("#timer-ring");
+  ring.style.strokeDasharray = TIMER_CIRC;
+  updateTimerUI();
+  state.timerInt = setInterval(()=>{
+    state.timeLeft -= 1;
+    updateTimerUI();
+    if(state.timeLeft<=0){
+      clearInterval(state.timerInt);
+      handleTimeUp();
+    }
+  },1000);
+}
+function updateTimerUI(){
+  const pct = Math.max(state.timeLeft,0)/QUESTION_TIME;
+  const ring = $("#timer-ring");
+  ring.style.strokeDashoffset = TIMER_CIRC*(1-pct);
+  $("#timer-num").textContent = Math.max(state.timeLeft,0);
+  ring.style.stroke = state.timeLeft<=5 ? "var(--danger)" : (state.timeLeft<=10 ? "var(--cat-anatomia)" : "var(--good)");
+}
+
+function selectAnswer(i){
+  if(state.answered) return;
+  state.answered = true;
+  clearInterval(state.timerInt);
+  const q = state.currentQuestion;
+  const correct = i===q.c;
+  document.querySelectorAll(".opt-btn").forEach((btn,idx)=>{
+    btn.disabled = true;
+    if(idx===q.c) btn.classList.add("correct");
+    else if(idx===i) btn.classList.add("incorrect");
+  });
+  finishQuestion(q, correct);
+}
+function handleTimeUp(){
+  if(state.answered) return;
+  state.answered = true;
+  const q = state.currentQuestion;
+  document.querySelectorAll(".opt-btn").forEach((btn,idx)=>{
+    btn.disabled = true;
+    if(idx===q.c) btn.classList.add("correct");
+  });
+  finishQuestion(q, false);
+}
+function finishQuestion(q, correct){
+  const player = state.players[state.current];
+  if(correct) player.correct++; else player.wrong++;
+  state.lastCorrect = correct;
+  $("#explain-text").textContent = q.e;
+  $("#explain").classList.add("show");
+  $("#continue-btn").classList.add("show");
+  $("#continue-btn").textContent = correct ? "Continuar" : "Passar a vez";
+}
+
+$("#continue-btn").addEventListener("click", onContinue);
+
+function onContinue(){
+  hideQuestionCard();
+  const player = state.players[state.current];
+  const cat = CATEGORIES[state.activeCatIndex];
+
+  if(state.lastCorrect){
+    if(!player.tokens.includes(cat.id)){
+      player.tokens.push(cat.id);
+      updateHudTokens(state.current);
+      if(player.tokens.length===6){ endGame(player); return; }
+    }
+    updateTurnBar(player.name+" acertou! Gire de novo.");
+  } else {
+    advanceTurn();
+    updateTurnBar();
+  }
+  $("#dial-hint").textContent = "Toque em girar\npara sortear a área";
+  $("#spin-btn").disabled = false;
+}
+
+function advanceTurn(){
+  state.current = (state.current+1) % state.players.length;
+}
+
+/* ===================== HUD ===================== */
+function buildHud(){
+  const hud = $("#hud");
+  hud.innerHTML = "";
+  state.players.forEach((p,i)=>{
+    const card = el("div","player-card");
+    card.id = "pcard-"+i;
+    const initials = p.name.trim().slice(0,2).toUpperCase();
+    let dots = "";
+    CATEGORIES.forEach((cat,ci)=>{
+      dots += '<div class="mini-dot" id="dot-'+i+'-'+ci+'" style="--dotcolor:'+cat.color+'; transform:rotate('+(ci*60)+'deg)"><i></i></div>';
+    });
+    card.innerHTML =
+      '<div class="avatar">'+initials+'</div>'+
+      '<div class="mini-dial">'+dots+'</div>'+
+      '<div class="player-meta"><span class="pname">'+p.name+'</span><span class="pscore" id="pscore-'+i+'">0/6</span></div>';
+    hud.appendChild(card);
+  });
+  highlightActivePlayer();
+}
+function updateHudTokens(playerIdx){
+  const player = state.players[playerIdx];
+  CATEGORIES.forEach((cat,ci)=>{
+    const dot = $("#dot-"+playerIdx+"-"+ci);
+    if(player.tokens.includes(cat.id)) dot.classList.add("filled");
+  });
+  $("#pscore-"+playerIdx).textContent = player.tokens.length+"/6";
+}
+function highlightActivePlayer(){
+  state.players.forEach((p,i)=>{
+    $("#pcard-"+i).classList.toggle("active", i===state.current);
+  });
+}
+function updateTurnBar(customMsg){
+  highlightActivePlayer();
+  const bar = $("#turn-bar");
+  if(customMsg){ bar.textContent = customMsg; return; }
+  const p = state.players[state.current];
+  bar.textContent = state.players.length>1 ? "Vez de "+p.name : "Sua vez, "+p.name;
+}
+
+/* ===================== fim de jogo ===================== */
+function endGame(winner){
+  clearInterval(state.timerInt);
+  $("#end-title").textContent = winner.name+" recebeu alta!";
+  $("#end-sub").textContent = "Completou as 6 áreas do FisioGame e dominou a prova.";
+  const statsWrap = $("#end-stats");
+  statsWrap.innerHTML = "";
+  state.players.forEach(p=>{
+    const card = el("div","end-stat-card");
+    card.innerHTML =
+      '<div class="pname">'+p.name+(p===winner?" 🏅":"")+'</div>'+
+      '<div class="figs"><span><b>'+p.tokens.length+'</b>/6 áreas</span><span>'+p.correct+' acertos</span><span>'+p.wrong+' erros</span></div>';
+    statsWrap.appendChild(card);
+  });
+  saveLeaderboard(winner);
+  renderLeaderboard();
+  showScreen("end");
+}
+
+function saveLeaderboard(winner){
+  try{
+    const key="fisiogame_leaderboard";
+    const list = JSON.parse(localStorage.getItem(key)||"[]");
+    list.unshift({ name:winner.name, correct:winner.correct, wrong:winner.wrong, date:new Date().toLocaleDateString("pt-BR") });
+    localStorage.setItem(key, JSON.stringify(list.slice(0,8)));
+  }catch(e){ /* localStorage indisponível */ }
+}
+function renderLeaderboard(){
+  const wrap = $("#leaderboard");
+  const box = $("#leaderboard-wrap");
+  try{
+    const list = JSON.parse(localStorage.getItem("fisiogame_leaderboard")||"[]");
+    if(list.length===0){ box.style.display="none"; return; }
+    box.style.display="block";
+    wrap.innerHTML = list.map(item=>
+      '<div class="lb-row"><span>'+item.name+'</span><span>'+item.correct+' acertos · '+item.date+'</span></div>'
+    ).join("");
+  }catch(e){
+    box.style.display="none";
+  }
+}
+
+$("#play-again-btn").addEventListener("click", ()=>{
+  state.players.forEach(p=>{ p.tokens=[]; p.correct=0; p.wrong=0; });
+  state.current = 0;
+  state.pool = {};
+  state.needleRotation = 0;
+  buildDial();
+  buildHud();
+  updateTurnBar();
+  hideQuestionCard();
+  showScreen("game");
+});
+$("#new-setup-btn").addEventListener("click", ()=>{ showScreen("setup"); });
+
+/* ===================== init ===================== */
+renderCatLegend();
+renderNameInputs();
+</script>
+</body>
+</html>

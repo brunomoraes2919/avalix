@@ -1522,6 +1522,9 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <div class="nav-section-label">Geral</div>
       <button class="nav-item active" data-view="dashboard"><i class="ti ti-layout-dashboard"></i> Painel geral</button>
 
+      <div class="nav-section-label" id="nav-section-comunidade">Comunidade</div>
+      <button class="nav-item" data-view="jogar"><i class="ti ti-device-gamepad-2"></i> Jogar <span class="role-chip" style="margin-left:auto;font-size:8px;padding:2px 5px;">BETA</span></button>
+
       <div class="nav-section-label">Avaliação</div>
       <button class="nav-item" data-view="alunos"><i class="ti ti-users"></i> Alunos</button>
       <button class="nav-item" data-view="avaliacoes"><i class="ti ti-clipboard-check"></i> Lançar notas</button>
@@ -1552,7 +1555,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <button class="btn btn-ghost btn-block btn-sm" id="logoutBtn" style="margin-top:10px;color:var(--ac-sand);border-color:rgba(246,243,236,0.25);">
         <i class="ti ti-logout"></i> Sair
       </button>
-      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-12 · v26</div>
+      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-13 Â· v27-beta</div>
     </div>
   </aside>
 
@@ -10811,7 +10814,8 @@ function pode(acao) {
     fichasClinicasEquipe: { title: 'Fichas', sub: 'Fichas integradas pelos alunos, organizadas por matéria e por aluno' },
     fichaModelos: { title: 'Cadastrar ficha', sub: 'Crie modelos de ficha (tópicos e subtópicos) e vincule a matérias' },
     mensagensAlunos: { title: 'Mensagens aos alunos', sub: 'Envie feedback e comentários para os alunos matriculados no semestre' },
-    minhasMensagens: { title: 'Mensagens', sub: 'Feedback e comentários enviados pelos professores' }
+    minhasMensagens: { title: 'Mensagens', sub: 'Feedback e comentários enviados pelos professores' },
+    jogar:          { title: 'FisioGame', sub: 'Acesso antecipado para testadores convidados' }
   };
 
   function applyRolePermissions() {
@@ -10822,7 +10826,7 @@ function pode(acao) {
     if (s.papel === 'aluno') {
       $all('.nav-item').forEach(btn => {
         const view = btn.dataset.view;
-        btn.style.display = (view === 'aluno' || view === 'fichasClinicas' || view === 'minhasMensagens') ? '' : 'none';
+        btn.style.display = (view === 'aluno' || view === 'fichasClinicas' || view === 'minhasMensagens' || view === 'jogar') ? '' : 'none';
       });
       $all('.nav-section-label').forEach(l => l.style.display = 'none');
       const alunoSec = $('#nav-section-aluno');
@@ -10840,6 +10844,7 @@ function pode(acao) {
     $all('.nav-item').forEach(btn => {
       const view = btn.dataset.view;
       if (view === 'aluno' || view === 'fichasClinicas' || view === 'minhasMensagens') { btn.style.display = 'none'; return; }
+      if (view === 'jogar' && !['admin', 'professor'].includes(s.papel)) { btn.style.display = 'none'; return; }
       if (adminOnlyViews.includes(view) && s.papel !== 'admin') {
         btn.style.display = 'none';
       } else if (profPlusViews.includes(view) && !['admin', 'professor'].includes(s.papel)) {
@@ -13655,5 +13660,6 @@ function pode(acao) {
 })();
 </script>
 
+<script src="fisio-beta.js"></script>
 </body>
 </html>
