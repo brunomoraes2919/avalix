@@ -3296,7 +3296,7 @@ function mensagensAluno_list(alunoId) {
     .sort((a, b) => new Date(a.criadoEm) - new Date(b.criadoEm));
 }
 
-function mensagensAluno_create(alunoId, texto) {
+function mensagensAluno_create(alunoId, texto, transmissaoId) {
   const db = db_load();
   const aluno = (db.alunos || []).find(a => a.id === alunoId);
   if (!aluno) return { ok: false, msg: 'Aluno(a) não encontrado(a).' };
@@ -3309,6 +3309,7 @@ function mensagensAluno_create(alunoId, texto) {
     autorId: session ? session.id : null,
     autorNome: session ? session.nome : 'Sistema',
     texto: txt,
+    transmissaoId: transmissaoId || null,
     criadoEm: new Date().toISOString(),
     lida: false
   };
@@ -3318,6 +3319,25 @@ function mensagensAluno_create(alunoId, texto) {
   notificacoes_create(alunoId, `Nova mensagem de ${nova.autorNome}`, null, 'minhasMensagens');
   logAction(`Mensagem enviada para ${aluno.nome}`);
   return { ok: true, mensagem: nova };
+}
+
+/* Envia a MESMA mensagem para vários alunos de uma vez (transmissão)
+   — cria um registro individual por aluno (cada um só vê a própria
+   cópia, no histórico dele), todos marcados com o mesmo
+   transmissaoId pra identificar depois que vieram do mesmo disparo. */
+function mensagensAluno_enviarTransmissao(alunoIds, texto) {
+  const txt = (texto || '').trim();
+  if (!txt) return { ok: false, msg: 'Escreva uma mensagem antes de enviar.' };
+  const idsValidos = Array.from(new Set((alunoIds || []).filter(Boolean)));
+  if (!idsValidos.length) return { ok: false, msg: 'Selecione ao menos um(a) aluno(a).' };
+  const transmissaoId = uid('transmissao');
+  let enviados = 0;
+  idsValidos.forEach(alunoId => {
+    const r = mensagensAluno_create(alunoId, txt, transmissaoId);
+    if (r.ok) enviados++;
+  });
+  if (!enviados) return { ok: false, msg: 'Não foi possível enviar para nenhum(a) aluno(a) selecionado(a).' };
+  return { ok: true, transmissaoId, quantidade: enviados };
 }
 
 function mensagensAluno_delete(id) {
@@ -13025,30 +13045,55 @@ function pode(acao) {
   let alunoSelecionadoId = null;
   let buscaAtual = '';
 
+  /* Avatar redondo: foto de perfil do aluno, se tiver; senão, iniciais. */
+  function avatarHtml(pessoa, tamanhoPx, fontePx) {
+    if (pessoa && pessoa.fotoDataUrl) {
+      return `<img src="${pessoa.fotoDataUrl}" alt="${escapeHtml(pessoa.nome || '')}" style="width:${tamanhoPx}px;height:${tamanhoPx}px;border-radius:50%;object-fit:cover;flex-shrink:0;">`;
+    }
+    return `<div class="avatar" style="width:${tamanhoPx}px;height:${tamanhoPx}px;font-size:${fontePx}px;flex-shrink:0;">${initials(pessoa ? pessoa.nome : '')}</div>`;
+  }
+
   function renderMensagensAlunosView(container) {
     alunoSelecionadoId = null;
     buscaAtual = '';
-    const alunos = alunos_doSemestreAtual().slice().sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+    const alunos = alunos_doSemestreAtual().slice();
 
     container.innerHTML = `
       <div style="display:grid;grid-template-columns:320px 1fr;gap:1.25rem;align-items:start;">
         <div class="card" style="padding:1rem;">
+          <button type="button" class="btn btn-accent btn-sm" id="btnNovaTransmissao" style="width:100%;margin-bottom:.75rem;justify-content:center;">
+            <i class="ti ti-speakerphone"></i> Transmissão em massa
+          </button>
           <div class="input-icon-wrap" style="margin-bottom:.75rem;">
             <i class="ti ti-search"></i>
             <input type="text" id="msgBuscaAluno" placeholder="Buscar aluno(a)" aria-label="Buscar aluno(a)">
           </div>
-          <div id="msgListaAlunos" style="display:flex;flex-direction:column;gap:2px;max-height:65vh;overflow-y:auto;"></div>
+          <div id="msgListaAlunos" style="display:flex;flex-direction:column;gap:2px;max-height:60vh;overflow-y:auto;"></div>
           ${!alunos.length ? '<div style="padding:1rem;color:var(--ac-charcoal-soft);font-size:13px;">Nenhum aluno matriculado neste semestre.</div>' : ''}
         </div>
         <div class="card card-pad" id="msgPainelChat" style="min-height:65vh;display:flex;flex-direction:column;"></div>
       </div>
     `;
 
+    /* Conversas com mensagem vêm primeiro, mais recente primeiro; quem
+       ainda não tem nenhuma mensagem fica depois, em ordem alfabética. */
+    function alunosOrdenados() {
+      return alunos.slice().sort((a, b) => {
+        const ua = mensagensAluno_ultima(a.id);
+        const ub = mensagensAluno_ultima(b.id);
+        if (ua && ub) return new Date(ub.criadoEm) - new Date(ua.criadoEm);
+        if (ua && !ub) return -1;
+        if (!ua && ub) return 1;
+        return a.nome.localeCompare(b.nome, 'pt-BR');
+      });
+    }
+
     function paintListaAlunos() {
       const termo = buscaAtual.trim().toLowerCase();
+      const base = alunosOrdenados();
       const filtrados = termo
-        ? alunos.filter(a => a.nome.toLowerCase().includes(termo) || (a.matricula || '').toLowerCase().includes(termo))
-        : alunos;
+        ? base.filter(a => a.nome.toLowerCase().includes(termo) || (a.matricula || '').toLowerCase().includes(termo))
+        : base;
       const listaEl = $('#msgListaAlunos', container);
       if (!listaEl) return;
       if (!filtrados.length) {
@@ -13058,13 +13103,16 @@ function pode(acao) {
       listaEl.innerHTML = filtrados.map(a => {
         const ultima = mensagensAluno_ultima(a.id);
         const ativo = a.id === alunoSelecionadoId;
+        const temConversa = !!ultima;
+        const fundo = ativo ? 'var(--ac-sand-dark)' : (temConversa ? '#EFF6FF' : 'transparent');
         return `
-          <button type="button" class="msg-aluno-item" data-id="${a.id}" style="display:flex;align-items:center;gap:10px;padding:.6rem .5rem;border-radius:8px;border:none;background:${ativo ? 'var(--ac-sand-dark)' : 'transparent'};text-align:left;cursor:pointer;width:100%;">
-            <div class="avatar" style="width:34px;height:34px;font-size:12px;flex-shrink:0;">${initials(a.nome)}</div>
+          <button type="button" class="msg-aluno-item" data-id="${a.id}" style="display:flex;align-items:center;gap:10px;padding:.6rem .5rem;border-radius:8px;border:none;background:${fundo};text-align:left;cursor:pointer;width:100%;">
+            ${avatarHtml(a, 34, 12)}
             <div style="min-width:0;flex:1;">
               <div style="font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(a.nome)}</div>
               <div style="font-size:12px;color:var(--ac-charcoal-soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${ultima ? escapeHtml(ultima.texto) : 'Sem mensagens ainda'}</div>
             </div>
+            ${temConversa ? `<span style="font-size:10px;color:var(--ac-charcoal-soft);flex-shrink:0;white-space:nowrap;">${fmtDataHora(ultima.criadoEm).split(' ')[0] || ''}</span>` : ''}
           </button>
         `;
       }).join('');
@@ -13095,7 +13143,7 @@ function pode(acao) {
 
       painel.innerHTML = `
         <div style="display:flex;align-items:center;gap:10px;padding-bottom:.85rem;border-bottom:1px solid var(--ac-line);margin-bottom:.85rem;">
-          <div class="avatar" style="width:38px;height:38px;font-size:13px;">${initials(aluno.nome)}</div>
+          ${avatarHtml(aluno, 38, 13)}
           <div>
             <div style="font-weight:600;">${escapeHtml(aluno.nome)}</div>
             <div style="font-size:12px;color:var(--ac-charcoal-soft);">${escapeHtml(aluno.matricula || '—')} · ${escapeHtml(aluno_turmaNome(aluno))}</div>
@@ -13104,7 +13152,10 @@ function pode(acao) {
         <div id="msgHistorico" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:.25rem 2px;">
           ${historico.length ? historico.map(m => `
             <div class="msg-bubble" data-id="${m.id}" style="align-self:flex-start;max-width:80%;background:var(--ac-sand-dark);border-radius:12px;padding:.6rem .85rem;">
-              <div style="font-size:12px;font-weight:600;color:var(--ac-terracotta-dark);margin-bottom:2px;">${escapeHtml(m.autorNome)}</div>
+              <div style="font-size:12px;font-weight:600;color:var(--ac-terracotta-dark);margin-bottom:2px;display:flex;align-items:center;gap:6px;">
+                ${escapeHtml(m.autorNome)}
+                ${m.transmissaoId ? '<span class="badge badge-neutral" style="font-size:9.5px;padding:1px 6px;" title="Enviada como parte de uma transmissão em massa"><i class="ti ti-speakerphone" style="font-size:10px;"></i> transmissão</span>' : ''}
+              </div>
               <div style="white-space:pre-wrap;font-size:14px;">${escapeHtml(m.texto)}</div>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px;gap:8px;">
                 <span style="font-size:11px;color:var(--ac-charcoal-soft);">${fmtDataHora(m.criadoEm)}${m.lida ? ' · lida' : ''}</span>
@@ -13157,10 +13208,98 @@ function pode(acao) {
       });
     }
 
+    function abrirModalTransmissao() {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      const alfabetico = alunos.slice().sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+      overlay.innerHTML = `
+        <div class="modal-box" style="max-width:560px;">
+          <div class="modal-head">
+            <h3><i class="ti ti-speakerphone"></i> Transmissão em massa</h3>
+            <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+          </div>
+          <div class="modal-body">
+            <div class="field">
+              <label for="transmissaoTexto">Mensagem</label>
+              <textarea id="transmissaoTexto" rows="3" placeholder="Escreva a mensagem que será enviada a todos os selecionados..." style="width:100%;resize:vertical;border-radius:8px;border:1px solid var(--ac-line-strong);padding:.6rem .75rem;font-family:inherit;font-size:14px;"></textarea>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin:.9rem 0 .5rem;flex-wrap:wrap;gap:6px;">
+              <label style="font-weight:600;font-size:13px;">Selecionar aluno(a)s <span id="transmissaoContagem" style="font-weight:400;color:var(--ac-charcoal-soft);">(0 selecionado(s))</span></label>
+              <div style="display:flex;gap:6px;">
+                <button type="button" class="btn btn-ghost btn-sm" id="btnTransmissaoTodos">Selecionar todos</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="btnTransmissaoNenhum">Limpar</button>
+              </div>
+            </div>
+            <div class="input-icon-wrap" style="margin-bottom:.5rem;">
+              <i class="ti ti-search"></i>
+              <input type="text" id="transmissaoBusca" placeholder="Buscar aluno(a)">
+            </div>
+            <div id="transmissaoLista" style="max-height:260px;overflow-y:auto;border:1px solid var(--ac-line);border-radius:8px;padding:.4rem;">
+              ${alfabetico.map(a => `
+                <label class="transmissao-item" data-nome="${escapeHtml(a.nome.toLowerCase())}" style="display:flex;align-items:center;gap:8px;padding:.4rem .3rem;cursor:pointer;border-radius:6px;">
+                  <input type="checkbox" class="transmissao-check" value="${a.id}">
+                  ${avatarHtml(a, 26, 10)}
+                  <span style="font-size:13.5px;">${escapeHtml(a.nome)}</span>
+                </label>
+              `).join('')}
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+            <button class="btn btn-accent" data-act="enviar"><i class="ti ti-send"></i> Enviar transmissão</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      function close() { overlay.remove(); }
+      overlay.querySelector('.modal-close').addEventListener('click', close);
+      overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+      function atualizarContagem() {
+        const n = overlay.querySelectorAll('.transmissao-check:checked').length;
+        overlay.querySelector('#transmissaoContagem').textContent = `(${n} selecionado${n === 1 ? '' : 's'})`;
+      }
+      overlay.querySelectorAll('.transmissao-check').forEach(chk => chk.addEventListener('change', atualizarContagem));
+
+      overlay.querySelector('#btnTransmissaoTodos').addEventListener('click', () => {
+        overlay.querySelectorAll('.transmissao-item').forEach(item => {
+          if (!item.classList.contains('hidden')) item.querySelector('.transmissao-check').checked = true;
+        });
+        atualizarContagem();
+      });
+      overlay.querySelector('#btnTransmissaoNenhum').addEventListener('click', () => {
+        overlay.querySelectorAll('.transmissao-check').forEach(c => { c.checked = false; });
+        atualizarContagem();
+      });
+      overlay.querySelector('#transmissaoBusca').addEventListener('input', function () {
+        const termo = this.value.trim().toLowerCase();
+        overlay.querySelectorAll('.transmissao-item').forEach(item => {
+          item.classList.toggle('hidden', !!termo && !item.dataset.nome.includes(termo));
+        });
+      });
+
+      overlay.querySelector('[data-act="enviar"]').addEventListener('click', () => {
+        const texto = $('#transmissaoTexto', overlay).value;
+        const ids = Array.from(overlay.querySelectorAll('.transmissao-check:checked')).map(c => c.value);
+        const res = mensagensAluno_enviarTransmissao(ids, texto);
+        if (res.ok) {
+          showToast(`Mensagem enviada para ${res.quantidade} aluno(a)${res.quantidade === 1 ? '' : 's'}.`, 'success');
+          close();
+          paintListaAlunos();
+          if (alunoSelecionadoId) paintChat();
+        } else {
+          showToast(res.msg, 'danger');
+        }
+      });
+    }
+
     $('#msgBuscaAluno', container).addEventListener('input', function () {
       buscaAtual = this.value;
       paintListaAlunos();
     });
+    $('#btnNovaTransmissao', container).addEventListener('click', abrirModalTransmissao);
 
     paintListaAlunos();
     paintChat();
