@@ -11212,6 +11212,7 @@ function pode(acao) {
     $('#screen-app').classList.remove('hidden');
     applyRolePermissions();
     paintUserChrome();
+    if (window.FisioGameOnline) window.FisioGameOnline.start();
     const _s = session_get();
     const concluirEntrada = function () { navigateTo(_s && _s.papel === 'aluno' ? 'aluno' : 'dashboard'); };
     if (_s && _s.papel === 'aluno' && window.AvalixAlunoSenha && window.AvalixAlunoSenha.precisaDefinirSenha()) {
