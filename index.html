@@ -5171,6 +5171,7 @@ function fichaClinica_create(alunoId, pacienteId, modeloId) {
     modeloId,
     status: 'rascunho',
     dados,
+    professorSupervisorId: null,
     criadoEm: agora,
     atualizadoEm: agora,
     integradoEm: null
@@ -5224,6 +5225,37 @@ function fichaClinica_obrigatoriosPendentes(ficha) {
   return pendentes;
 }
 
+/* Professores vinculados à(s) matéria(s) do modelo desta ficha — usado
+   pra saber quem pode assinar como "professor(a) supervisor(a)" no
+   documento final. */
+function fichaClinica_professoresDaMateria(ficha) {
+  const modelo = fichaModelo_get(ficha.modeloId);
+  if (!modelo) return [];
+  const idsProfessores = new Set();
+  (modelo.materiasIds || []).forEach(mid => {
+    const mat = materia_get(mid);
+    if (mat) (mat.supervisores || []).forEach(pid => idsProfessores.add(pid));
+  });
+  return Array.from(idsProfessores)
+    .map(id => users_get(id))
+    .filter(u => u && u.papel === 'professor' && u.ativo);
+}
+
+/* Define (ou troca) o professor supervisor que assina o documento
+   final da ficha — usado quando há mais de um professor na matéria e
+   alguém (admin ou professor) precisa escolher qual deles assina. */
+function fichaClinica_definirProfessorSupervisor(fichaId, professorId) {
+  const db = db_load();
+  const ficha = (db.fichasClinicas || []).find(f => f.id === fichaId);
+  if (!ficha) return { ok: false, msg: 'Ficha não encontrada.' };
+  const prof = (db.users || []).find(u => u.id === professorId && u.papel === 'professor' && u.ativo);
+  if (!prof) return { ok: false, msg: 'Professor(a) inválido(a).' };
+  ficha.professorSupervisorId = professorId;
+  db_save(db);
+  logAction(`Professor(a) supervisor(a) definido(a) na ficha: ${prof.nome}`);
+  return { ok: true, ficha };
+}
+
 /* Integração — ação irreversível. Bloqueada se houver campo
    obrigatório do modelo ainda não preenchido. A partir daqui a ficha
    é só-leitura e passa a ficar visível para o(s) professor(es). */
@@ -5240,6 +5272,13 @@ function fichaClinica_integrar(id) {
   ficha.status = 'integrada';
   ficha.integradoEm = agora;
   ficha.atualizadoEm = agora;
+  // Se a matéria tem só 1 professor vinculado, já assina sozinho —
+  // só fica em aberto (pra alguém escolher na tela de visualização)
+  // quando há mais de um professor possível.
+  if (!ficha.professorSupervisorId) {
+    const profs = fichaClinica_professoresDaMateria(ficha);
+    if (profs.length === 1) ficha.professorSupervisorId = profs[0].id;
+  }
   db_save(db);
   try { logAction('Ficha clínica integrada (aluno ' + ficha.alunoId + ')'); } catch (e) {}
   return { ok: true, ficha };
@@ -11629,12 +11668,18 @@ function pode(acao) {
   }
 
   /* ── Ficha impressa / PDF — reaproveitada pela view do aluno e da equipe ── */
-  function buildFichaSheetHtml(ficha) {
+  function buildFichaSheetHtml(ficha, opts) {
+    opts = opts || {};
     const aluno = alunos_get(ficha.alunoId);
     const paciente = paciente_get(ficha.pacienteId);
     const modelo = fichaModelo_get(ficha.modeloId);
     const instituicao = instituicao_get();
     const numero = numeroDaFichaNoPaciente(ficha.id, ficha.pacienteId);
+
+    let profSupervisor = ficha.professorSupervisorId ? users_get(ficha.professorSupervisorId) : null;
+    const profsDaMateria = !profSupervisor ? fichaClinica_professoresDaMateria(ficha) : [];
+    if (!profSupervisor && profsDaMateria.length === 1) profSupervisor = profsDaMateria[0];
+    const podeEscolherProfessor = !!opts.podeEditarSupervisor && !profSupervisor && profsDaMateria.length > 1 && ficha.status === 'integrada';
 
     return `
       <div class="report-sheet">
@@ -11680,7 +11725,17 @@ function pode(acao) {
             <div class="sig-role">Assinatura do(a) estagiário(a)${aluno && aluno.matricula ? ' — matrícula ' + escapeHtml(aluno.matricula) : ''}</div>
           </div>
           <div class="sig-line">
-            <div class="sig-name">&nbsp;</div>
+            <div class="sig-name">
+              ${profSupervisor
+                ? escapeHtml(profSupervisor.nome)
+                : podeEscolherProfessor
+                  ? `<select id="selProfessorSupervisorFicha" class="no-print" style="font-size:13px;padding:3px 8px;border-radius:6px;border:1px solid var(--ac-line-strong);">
+                       <option value="">Selecionar professor(a)…</option>
+                       ${profsDaMateria.map(p => `<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join('')}
+                     </select>`
+                  : '&nbsp;'
+              }
+            </div>
             <div class="sig-role">Assinatura do(a) professor(a) supervisor(a)</div>
           </div>
         </div>
@@ -11697,6 +11752,8 @@ function pode(acao) {
   function paintVisualizacao(container, fichaId, onVoltar, contextoLabel) {
     const ficha = fichaClinica_get(fichaId);
     if (!ficha) { onVoltar(); return; }
+    const sess = session_get();
+    const podeEditarSupervisor = !!(sess && sess.papel !== 'aluno');
 
     container.innerHTML = `
       <div class="report-toolbar no-print">
@@ -11711,12 +11768,26 @@ function pode(acao) {
         Na janela de impressão do navegador, escolha o destino <strong>"Salvar como PDF"</strong> para baixar o arquivo com os campos de assinatura.
       </p>
       <div id="print-area">
-        ${buildFichaSheetHtml(ficha)}
+        ${buildFichaSheetHtml(ficha, { podeEditarSupervisor })}
       </div>
     `;
 
     $('#btnVoltarVisFicha', container).addEventListener('click', onVoltar);
     $('#btnBaixarPdfFicha', container).addEventListener('click', () => window.print());
+
+    const selProf = $('#selProfessorSupervisorFicha', container);
+    if (selProf) {
+      selProf.addEventListener('change', () => {
+        if (!selProf.value) return;
+        const res = fichaClinica_definirProfessorSupervisor(ficha.id, selProf.value);
+        if (res.ok) {
+          showToast('Professor(a) supervisor(a) definido(a) na ficha.', 'success');
+          paintVisualizacao(container, fichaId, onVoltar, contextoLabel);
+        } else {
+          showToast(res.msg, 'danger');
+        }
+      });
+    }
   }
 
   /* ══════════════════════ VIEW DO ALUNO ══════════════════════ */
