@@ -299,6 +299,7 @@
   function repaintIfOpen() {
     var active = document.querySelector('.nav-item.active');
     var container = document.getElementById('viewContent');
+    if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) return;
     if (active && active.dataset.view === 'jogar' && container && !container.querySelector('.fg-game-frame') && !container.querySelector('.fg-chat') && !container.querySelector('.fg-play')) renderView(container);
   }
 
