@@ -1555,7 +1555,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <button class="btn btn-ghost btn-block btn-sm" id="logoutBtn" style="margin-top:10px;color:var(--ac-sand);border-color:rgba(246,243,236,0.25);">
         <i class="ti ti-logout"></i> Sair
       </button>
-      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-13 Â· v27-beta</div>
+      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-13 Â· v28-beta</div>
     </div>
   </aside>
 
@@ -3395,6 +3395,7 @@ function mensagensAluno_ultima(alunoId) {
 function session_set(user) {
   const obj = { id: user.id, nome: user.nome, email: user.email, papel: user.papel };
   if (user.alunoId) obj.alunoId = user.alunoId; // preservar para sessões de aluno(a)
+  if (user.primeiroAcesso !== undefined) obj.primeiroAcesso = !!user.primeiroAcesso;
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(obj));
 }
 function session_get() {
@@ -3418,24 +3419,16 @@ function auth_login(identificador, senha) {
     logAction(`Login realizado por ${user.nome}`);
     return { ok: true, user };
   }
-  // Tentativa 2 — aluno (usuário de login cadastrado + matrícula como senha)
+  // Aluno: o RGA vale somente no primeiro acesso.
+  // Depois disso, a senha definitiva armazenada como hash e obrigatoria.
   const aluno = db.alunos.find(a =>
-    a.ativo &&
-    (a.usuario || '').toLowerCase().trim() === idNorm &&
-    (a.matricula || '').trim() !== '' &&
-    (a.matricula || '').trim() === senha.trim()
+    a.ativo && (a.usuario || '').toLowerCase().trim() === idNorm
   );
   if (aluno) {
-    const sess = {
-      id: aluno.id, nome: aluno.nome, email: aluno.email,
-      papel: 'aluno', alunoId: aluno.id, ativo: true,
-      criadoEm: aluno.criadoEm || new Date().toISOString()
-    };
-    session_set(sess);
-    logAction(`Login do aluno(a): ${aluno.nome}`);
-    return { ok: true, user: sess };
+    if (!window.AvalixAlunoSenha) return { ok: false, msg: 'O modulo de senha do aluno nao foi carregado.' };
+    return window.AvalixAlunoSenha.login(aluno, senha);
   }
-  return { ok: false, msg: 'Credenciais inválidas. Verifique e-mail/usuário e senha (ou matrícula).' };
+  return { ok: false, msg: 'Credenciais invalidas. Verifique usuario e senha.' };
 }
 
 function auth_logout() {
@@ -3751,6 +3744,8 @@ function alunos_update(id, payload) {
   if (payload.turmaId !== undefined) aluno.turmaId = payload.turmaId || null;
   if (payload.supervisorPadraoId !== undefined) aluno.supervisorPadraoId = payload.supervisorPadraoId || null;
   if (payload.fotoDataUrl !== undefined) aluno.fotoDataUrl = payload.fotoDataUrl;
+  if (payload.senhaHash !== undefined) aluno.senhaHash = payload.senhaHash || null;
+  if (payload.senhaDefinidaEm !== undefined) aluno.senhaDefinidaEm = payload.senhaDefinidaEm || null;
   db_save(db);
   logAction(`Aluno(a) editado(a): ${aluno.nome}`);
   return { ok: true, aluno };
@@ -10703,14 +10698,18 @@ function pode(acao) {
          o login continua normalmente com os dados que já existirem
          localmente, em vez de travar a tela. */
       const tentarLogin = function () {
-        const res = auth_login(email, senha);
-        if (btnEntrar) { btnEntrar.disabled = false; btnEntrar.innerHTML = rotuloOriginal; }
-        if (!res.ok) {
-          renderAlert('#login-alert', 'danger', res.msg);
-          return;
-        }
-        renderAlert('#login-alert', '', '');
-        enterApp();
+        Promise.resolve(auth_login(email, senha)).then(function (res) {
+          if (btnEntrar) { btnEntrar.disabled = false; btnEntrar.innerHTML = rotuloOriginal; }
+          if (!res.ok) {
+            renderAlert('#login-alert', 'danger', res.msg);
+            return;
+          }
+          renderAlert('#login-alert', '', '');
+          enterApp();
+        }).catch(function () {
+          if (btnEntrar) { btnEntrar.disabled = false; btnEntrar.innerHTML = rotuloOriginal; }
+          renderAlert('#login-alert', 'danger', 'Nao foi possivel validar o acesso. Tente novamente.');
+        });
       };
       if (typeof _supaPullAguardando === 'function') {
         _supaPullAguardando(2500).then(tentarLogin);
@@ -11214,7 +11213,12 @@ function pode(acao) {
     applyRolePermissions();
     paintUserChrome();
     const _s = session_get();
-    navigateTo(_s && _s.papel === 'aluno' ? 'aluno' : 'dashboard');
+    const concluirEntrada = function () { navigateTo(_s && _s.papel === 'aluno' ? 'aluno' : 'dashboard'); };
+    if (_s && _s.papel === 'aluno' && window.AvalixAlunoSenha && window.AvalixAlunoSenha.precisaDefinirSenha()) {
+      window.AvalixAlunoSenha.show(concluirEntrada);
+    } else {
+      concluirEntrada();
+    }
   }
 
   function exitApp() {
@@ -13660,6 +13664,7 @@ function pode(acao) {
 })();
 </script>
 
+<script src="aluno-primeiro-acesso.js"></script>
 <script src="fisio-beta.js"></script>
 </body>
 </html>
