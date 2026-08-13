@@ -1320,16 +1320,19 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
     border: none;
     border-radius: 0;
     max-width: 100%;
-    /* Vertical vem daqui (não mais da margem da página) — só assim dá
-       pra zerar a margem vertical do @page e tirar o cabeçalho/rodapé
-       que o navegador desenha ali (data + título no topo, URL +
-       número de página embaixo). O respiro horizontal continua vindo
-       do @page, que se repete certinho em toda página. */
-    padding: 14mm 0;
+    padding: 0;
     margin: 0;
   }
   .report-sheet + .report-sheet { page-break-before: always; break-before: page; }
-  @page { size: A4; margin: 0 13mm; }
+  /* A margem da página precisa existir em TODA página, não só na
+     primeira/última — é o que evita conteúdo cortado perto da borda
+     do papel em documentos de várias páginas. Por isso a remoção do
+     cabeçalho/rodapé do navegador (data, título, URL, nº de página)
+     não pode ser automática por CSS aqui: exigiria zerar essa margem,
+     e isso cortaria conteúdo nas páginas do meio. A forma segura e
+     garantida é desmarcar "Cabeçalhos e rodapés" na janela de
+     impressão do navegador (em "Mais configurações"). */
+  @page { size: A4; margin: 14mm 13mm; }
 }
 
 </style>
