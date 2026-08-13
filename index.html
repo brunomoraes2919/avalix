@@ -4650,6 +4650,26 @@ function avaliacoes_delete(id) {
   return { ok: true };
 }
 
+/* Apaga TODAS as fichas de avaliação de uma vez (rascunho e
+   finalizada) — ação em massa, só para o administrador do sistema.
+   Cada uma vira lápide individualmente, senão sincronizar com outro
+   aparelho que ainda tem as fichas antigas as traria de volta. */
+function avaliacoes_limparTodas() {
+  const session = session_get();
+  if (!session || session.papel !== 'admin') {
+    return { ok: false, msg: 'Só o administrador do sistema pode limpar todas as fichas de avaliação.' };
+  }
+  const db = db_load();
+  const todas = db.avaliacoes || [];
+  const quantidade = todas.length;
+  if (quantidade === 0) return { ok: true, quantidade: 0 };
+  todas.forEach(av => _registrarRemocao(db, 'avaliacoes', av.id));
+  db.avaliacoes = [];
+  db_save(db);
+  logAction(`Todas as fichas de avaliação foram excluídas pelo administrador (${quantidade} ficha(s))`);
+  return { ok: true, quantidade };
+}
+
 /* ---------- Supervisor(es) de uma ficha (helpers de exibição) ---------- */
 function avaliacao_supervisorPrincipal(aval) {
   return aval.supervisorPrincipalId ? users_get(aval.supervisorPrincipalId) : null;
@@ -8403,6 +8423,7 @@ function pode(acao) {
         <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
           ${canEdit ? '<button class="btn btn-accent" id="btnNovaFicha"><i class="ti ti-clipboard-plus"></i> Nova ficha de avaliação</button>' : ''}
           ${canEdit ? '<button class="btn btn-primary" id="btnSisModo" title="Selecionar fichas finalizadas para integrar com o SIS Univag"><i class="ti ti-send"></i> Integrar notas com SIS Univag</button>' : ''}
+          ${session && session.papel === 'admin' ? '<button class="btn btn-ghost" id="btnLimparTodasFichas" style="color:var(--ac-danger);" title="Excluir permanentemente todas as fichas de avaliação"><i class="ti ti-trash"></i> Limpar todas as fichas</button>' : ''}
         </div>
       </div>
 
@@ -8470,6 +8491,12 @@ function pode(acao) {
       listStatus = this.value;
       paintListTable(container);
     });
+
+    const btnLimparTodas = $('#btnLimparTodasFichas', container);
+    if (btnLimparTodas) {
+      btnLimparTodas.addEventListener('click', () => abrirModalLimparTodasFichas(container));
+    }
+
     if (canEdit) {
       $('#btnNovaFicha', container).addEventListener('click', () => openNovaFichaModal(container));
 
@@ -9018,6 +9045,70 @@ function pode(acao) {
         }
       }
     };
+  }
+
+  function abrirModalLimparTodasFichas(container) {
+    const todas = avaliacoes_list();
+    const qtdRascunho = todas.filter(a => a.status === 'rascunho').length;
+    const qtdFinalizada = todas.filter(a => a.status === 'finalizada').length;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:480px;">
+        <div class="modal-head">
+          <h3 style="color:var(--ac-danger);"><i class="ti ti-alert-triangle"></i> Limpar todas as fichas de avaliação</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          ${todas.length === 0 ? `
+            <p style="margin:0;font-size:13.5px;color:var(--ac-charcoal-soft);">Não existe nenhuma ficha de avaliação cadastrada no momento.</p>
+          ` : `
+            <div style="background:var(--ac-sand);border-radius:8px;padding:.65rem .85rem;margin-bottom:.9rem;font-size:13px;">
+              <div><strong>${todas.length}</strong> ficha${todas.length === 1 ? '' : 's'} de avaliação no total</div>
+              <div style="color:var(--ac-charcoal-soft);">${qtdRascunho} rascunho${qtdRascunho === 1 ? '' : 's'} · ${qtdFinalizada} finalizada${qtdFinalizada === 1 ? '' : 's'}</div>
+            </div>
+            <div style="background:var(--ac-danger-bg);border:1px solid var(--ac-danger);border-radius:8px;padding:.65rem .85rem;margin-bottom:.9rem;">
+              <ul style="margin:0;padding-left:1.1rem;font-size:12.5px;color:#7F1D1D;line-height:1.6;">
+                <li>Isso inclui as fichas <strong>já finalizadas</strong>, não só os rascunhos.</li>
+                <li>Alunos deixam de ver qualquer resultado, parcial ou oficial, de todas elas.</li>
+                <li>Essa ação <strong>não pode ser desfeita</strong> — não existe backup dentro do sistema.</li>
+              </ul>
+            </div>
+            <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer;">
+              <input type="checkbox" id="chkCienteLimparTodas" style="margin-top:2px;">
+              <span>Estou ciente das implicações acima e quero excluir todas as ${todas.length} ficha${todas.length === 1 ? '' : 's'} mesmo assim.</span>
+            </label>
+          `}
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          ${todas.length > 0 ? `<button class="btn btn-danger" data-act="confirm" id="btnConfirmarLimparTodas" disabled><i class="ti ti-trash"></i> Excluir todas permanentemente</button>` : ''}
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    const chk = $('#chkCienteLimparTodas', overlay);
+    const btnConfirmar = $('#btnConfirmarLimparTodas', overlay);
+    if (chk && btnConfirmar) {
+      chk.addEventListener('change', () => { btnConfirmar.disabled = !chk.checked; });
+      btnConfirmar.addEventListener('click', () => {
+        const r = avaliacoes_limparTodas();
+        if (r.ok) {
+          showToast(`${r.quantidade} ficha(s) de avaliação excluída(s).`, 'success');
+          close();
+          paintListTable(container);
+        } else {
+          showToast(r.msg, 'danger');
+        }
+      });
+    }
   }
 
   function openNovaFichaModal(container) {
