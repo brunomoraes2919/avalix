@@ -8634,6 +8634,7 @@ function pode(acao) {
     const session = session_get();
     const canEdit = (window.pode ? pode('lancarNotas') : ['admin', 'professor'].includes(session && session.papel));
 
+    const totalGeral = avaliacoes_list().length;
     let lista = avaliacoes_list();
 
     /* Professores só veem as fichas onde são supervisor (principal ou compartilhado) */
@@ -8643,6 +8644,7 @@ function pode(acao) {
         (Array.isArray(a.supervisoresCompartilhadosIds) && a.supervisoresCompartilhadosIds.includes(session.id))
       );
     }
+    const totalAposSupervisor = lista.length;
 
     /* Só fichas de cenários vinculados a uma matéria do semestre
        selecionado no filtro global (cenários órfãos, sem matéria,
@@ -8652,6 +8654,7 @@ function pode(acao) {
       const matInfo = cenario_materiaInfo(a.cenarioId);
       return !matInfo || _materiasSemestreIds.has(matInfo.materia.id);
     });
+    const totalAposSemestre = lista.length;
 
     if (listStatus !== 'todos') lista = lista.filter(a => a.status === listStatus);
     if (listSearch) {
@@ -8666,9 +8669,35 @@ function pode(acao) {
       });
     }
 
+    /* Monta um aviso explicando ONDE as fichas "sumiram", se for o
+       caso — em vez de só dizer "nenhuma encontrada" sem contexto. */
+    function avisoDiagnostico() {
+      if (totalGeral === 0) return '';
+      if (totalAposSupervisor < totalGeral) {
+        const ocultas = totalGeral - totalAposSupervisor;
+        return `<div style="margin-top:10px;font-size:12.5px;background:var(--ac-warning-bg);border:1px solid var(--ac-warning);border-radius:8px;padding:.6rem .85rem;color:#78350F;">
+          Existe${ocultas === 1 ? '' : 'm'} ${ocultas} ficha${ocultas === 1 ? '' : 's'} no sistema em que você não está como supervisor(a) — por isso não aparece${ocultas === 1 ? '' : 'm'} aqui.
+        </div>`;
+      }
+      if (totalAposSemestre < totalAposSupervisor) {
+        const ocultas = totalAposSupervisor - totalAposSemestre;
+        return `<div style="margin-top:10px;font-size:12.5px;background:var(--ac-warning-bg);border:1px solid var(--ac-warning);border-radius:8px;padding:.6rem .85rem;color:#78350F;">
+          Existe${ocultas === 1 ? '' : 'm'} ${ocultas} ficha${ocultas === 1 ? '' : 's'} pertencentes a matérias de <strong>outro semestre</strong> — troque o semestre no topo da tela pra ver.
+        </div>`;
+      }
+      if (lista.length < totalAposSemestre) {
+        return `<div style="margin-top:10px;font-size:12.5px;background:var(--ac-sand);border-radius:8px;padding:.6rem .85rem;color:var(--ac-charcoal-soft);">
+          Há fichas neste semestre, mas nenhuma corresponde à busca ou ao filtro de status selecionado — tente limpar os filtros acima.
+        </div>`;
+      }
+      return '';
+    }
+
     if (lista.length === 0) {
       tbody.innerHTML = '';
       empty.classList.remove('hidden');
+      empty.querySelector('.fav-empty-diagnostico') && empty.querySelector('.fav-empty-diagnostico').remove();
+      empty.insertAdjacentHTML('beforeend', `<div class="fav-empty-diagnostico">${avisoDiagnostico()}</div>`);
       return;
     }
     empty.classList.add('hidden');
