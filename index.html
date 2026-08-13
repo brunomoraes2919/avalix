@@ -5312,13 +5312,22 @@ function fichaClinica_integrar(id) {
   return { ok: true, ficha };
 }
 
-/* Exclusão só é permitida em rascunho — depois de integrada, mesmo um
-   admin não apaga (é um documento clínico, não um dado de trabalho). */
+/* Rascunho: qualquer um com permissão pode excluir normalmente.
+   Integrada (documento clínico oficial): só o administrador do
+   sistema pode excluir — e a tela que chama isso é responsável por
+   confirmar com a pessoa antes, explicando as implicações. */
 function fichaClinica_delete(id) {
   const db = db_load();
   const idx = (db.fichasClinicas || []).findIndex(f => f.id === id);
   if (idx === -1) return { ok: false, msg: 'Ficha não encontrada.' };
-  if (db.fichasClinicas[idx].status !== 'rascunho') return { ok: false, msg: 'Só é possível excluir fichas em rascunho — fichas integradas são permanentes.' };
+  const ficha = db.fichasClinicas[idx];
+  if (ficha.status !== 'rascunho') {
+    const session = session_get();
+    if (!session || session.papel !== 'admin') {
+      return { ok: false, msg: 'Esta ficha já foi integrada — só o administrador do sistema pode excluí-la.' };
+    }
+    logAction(`Ficha clínica INTEGRADA excluída pelo administrador (paciente: ${(paciente_get(ficha.pacienteId) || {}).nome || '—'}, aluno: ${(alunos_get(ficha.alunoId) || {}).nome || '—'})`);
+  }
   db.fichasClinicas.splice(idx, 1);
   _registrarRemocao(db, 'fichasClinicas', id);
   db_save(db);
@@ -11775,6 +11784,72 @@ function pode(acao) {
     `;
   }
 
+  function abrirModalExcluirFichaIntegrada(ficha, onExcluida) {
+    const aluno = alunos_get(ficha.alunoId);
+    const paciente = paciente_get(ficha.pacienteId);
+    const modelo = fichaModelo_get(ficha.modeloId);
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box" style="max-width:480px;">
+        <div class="modal-head">
+          <h3 style="color:var(--ac-danger);"><i class="ti ti-alert-triangle"></i> Excluir ficha integrada</h3>
+          <button class="modal-close" aria-label="Fechar"><i class="ti ti-x"></i></button>
+        </div>
+        <div class="modal-body">
+          <p style="margin:0 0 .75rem;font-size:13.5px;">
+            Você está prestes a excluir permanentemente:
+          </p>
+          <div style="background:var(--ac-sand);border-radius:8px;padding:.65rem .85rem;margin-bottom:.9rem;font-size:13px;">
+            <div><strong>${escapeHtml(modelo ? modelo.titulo : 'Ficha')}</strong></div>
+            <div style="color:var(--ac-charcoal-soft);">Aluno(a): ${escapeHtml(aluno ? aluno.nome : '—')}</div>
+            <div style="color:var(--ac-charcoal-soft);">Paciente: ${escapeHtml(paciente ? paciente.nome : '—')}</div>
+            <div style="color:var(--ac-charcoal-soft);">Integrada em: ${fmtDataHora(ficha.integradoEm)}</div>
+          </div>
+          <div style="background:var(--ac-danger-bg);border:1px solid var(--ac-danger);border-radius:8px;padding:.65rem .85rem;margin-bottom:.9rem;">
+            <p style="margin:0 0 .5rem;font-size:12.5px;color:#7F1D1D;line-height:1.5;">
+              <strong>Isso é um documento clínico já integrado</strong> — não um rascunho. Ao excluir:
+            </p>
+            <ul style="margin:0;padding-left:1.1rem;font-size:12.5px;color:#7F1D1D;line-height:1.6;">
+              <li>A ficha some permanentemente, inclusive da tela do(a) aluno(a) que a preencheu.</li>
+              <li>O histórico de atendimento desse paciente perde esse registro.</li>
+              <li>Essa ação <strong>não pode ser desfeita</strong> — não existe backup dentro do sistema.</li>
+            </ul>
+          </div>
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;cursor:pointer;">
+            <input type="checkbox" id="chkCienteExclusao" style="margin-top:2px;">
+            <span>Estou ciente das implicações acima e quero excluir esta ficha mesmo assim.</span>
+          </label>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
+          <button class="btn btn-danger" data-act="confirm" id="btnConfirmarExclusaoIntegrada" disabled><i class="ti ti-trash"></i> Excluir permanentemente</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    function close() { overlay.remove(); }
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    const chk = $('#chkCienteExclusao', overlay);
+    const btnConfirmar = $('#btnConfirmarExclusaoIntegrada', overlay);
+    chk.addEventListener('change', () => { btnConfirmar.disabled = !chk.checked; });
+
+    btnConfirmar.addEventListener('click', () => {
+      const r = fichaClinica_delete(ficha.id);
+      if (r.ok) {
+        showToast('Ficha excluída permanentemente.', 'success');
+        close();
+        onExcluida();
+      } else {
+        showToast(r.msg, 'danger');
+      }
+    });
+  }
+
   /* Tela de visualização (somente leitura) + botão de baixar PDF —
      usada tanto pelo aluno (depois de integrar) quanto pela equipe. */
   function paintVisualizacao(container, fichaId, onVoltar, contextoLabel) {
@@ -11782,6 +11857,7 @@ function pode(acao) {
     if (!ficha) { onVoltar(); return; }
     const sess = session_get();
     const podeEditarSupervisor = !!(sess && sess.papel !== 'aluno');
+    const podeExcluirIntegrada = !!(sess && sess.papel === 'admin' && ficha.status === 'integrada');
 
     container.innerHTML = `
       <div class="report-toolbar no-print">
@@ -11790,7 +11866,10 @@ function pode(acao) {
           <span style="color:var(--ac-line-strong);">/</span>
           <span style="font-size:13.5px;color:var(--ac-charcoal-soft);">${escapeHtml(contextoLabel || 'Fichas')}</span>
         </div>
-        <button class="btn btn-accent" id="btnBaixarPdfFicha"><i class="ti ti-printer"></i> Baixar em PDF</button>
+        <div style="display:flex;gap:8px;">
+          ${podeExcluirIntegrada ? `<button class="btn btn-ghost btn-sm" id="btnExcluirFichaIntegrada" style="color:var(--ac-danger);"><i class="ti ti-trash"></i> Excluir ficha</button>` : ''}
+          <button class="btn btn-accent" id="btnBaixarPdfFicha"><i class="ti ti-printer"></i> Baixar em PDF</button>
+        </div>
       </div>
       <p class="no-print" style="text-align:center;max-width:900px;margin:-0.6rem auto 1.2rem;font-size:12.5px;color:var(--ac-charcoal-soft);">
         Na janela de impressão do navegador, escolha o destino <strong>"Salvar como PDF"</strong> para baixar o arquivo com os campos de assinatura.
@@ -11802,6 +11881,13 @@ function pode(acao) {
 
     $('#btnVoltarVisFicha', container).addEventListener('click', onVoltar);
     $('#btnBaixarPdfFicha', container).addEventListener('click', () => window.print());
+
+    const btnExcluir = $('#btnExcluirFichaIntegrada', container);
+    if (btnExcluir) {
+      btnExcluir.addEventListener('click', () => {
+        abrirModalExcluirFichaIntegrada(ficha, onVoltar);
+      });
+    }
 
     const selProf = $('#selProfessorSupervisorFicha', container);
     if (selProf) {
