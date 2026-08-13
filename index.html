@@ -2036,11 +2036,17 @@ function _supaPollCheck() {
         try { local = raw ? JSON.parse(raw) : null; } catch (e) { local = null; }
         var mesclado = local ? _supaMergeDados(local, row.dados, 'remoto') : row.dados;
         localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
-        /* Atualizar a tela atual suavemente */
+        /* Atualizar a tela atual suavemente — mas NUNCA enquanto
+           houver um formulário de edição sensível aberto (ex.:
+           lançamento de notas). Sem essa checagem, qualquer alteração
+           de QUALQUER outra pessoa no sistema forçava um recarregamento
+           da tela e apagava o que estava sendo digitado na hora. Os
+           dados já foram mesclados e salvos acima — só a atualização
+           visual é adiada até a pessoa terminar/sair da edição. */
         try {
           var activeBtn = document.querySelector('.nav-item.active');
           var view = activeBtn ? activeBtn.dataset.view : null;
-          if (view && window.AvaliaClinNavigate) {
+          if (view && window.AvaliaClinNavigate && !window.__avalixEdicaoAberta) {
             window.AvaliaClinNavigate(view);
           }
           if (typeof window.refreshNotifBadge === 'function') window.refreshNotifBadge();
@@ -4386,6 +4392,26 @@ function avaliacoes_setSisEnviado(ids) {
 }
 
 
+/* Uma avaliação "rascunho" recém-criada já nasce com a estrutura de
+   notas em branco (uma entrada vazia por critério/quinzena) — não dá
+   pra distinguir isso de "ainda não abri pra editar" só olhando se
+   `notas` existe. Esta função checa se há ALGUM valor de fato
+   preenchido (nota ou prova teórica), usada para não expor ao aluno
+   uma ficha que acabou de ser criada mas que o professor ainda nem
+   começou a preencher. */
+function avaliacao_temConteudo(av) {
+  if (!av) return false;
+  if (av.provaTeorica !== undefined && av.provaTeorica !== null && String(av.provaTeorica).trim() !== '') return true;
+  const notas = av.notas || {};
+  return Object.keys(notas).some(critId => {
+    const porQuinzena = notas[critId] || {};
+    return Object.keys(porQuinzena).some(q => {
+      const v = porQuinzena[q];
+      return v !== undefined && v !== null && String(v).trim() !== '';
+    });
+  });
+}
+
 function avaliacoes_blankNotas(cenarioId) {
   const cenario = cenario_get(cenarioId);
   const quinzenas = cenario ? (cenario.quinzenas || []) : [];
@@ -4455,9 +4481,10 @@ function avaliacoes_create(payload) {
   avaliacoes_notificarNovosSupervisores(
     nova, [], [nova.supervisorPrincipalId].concat(nova.supervisoresCompartilhadosIds), aluno.nome
   );
-  // Notificar o aluno sobre a nova ficha
-  notificacoes_create(nova.alunoId,
-    `Nova ficha de avaliação criada para você — cenário: ${cenario.nome}`, nova.id);
+  // Não notifica o aluno aqui — a ficha acaba de ser criada, ainda
+  // sem nenhuma nota preenchida. Ele é avisado quando a ficha for
+  // finalizada (ver avaliacoes_update) ou passa a ver "em andamento"
+  // no próprio painel assim que houver algum conteúdo real salvo.
   logAction(`Ficha de avaliação criada para ${aluno.nome} (${cenario.nome})`);
   return { ok: true, avaliacao: nova };
 }
@@ -8239,6 +8266,7 @@ function pode(acao) {
     }
     currentMode = 'list';
     currentAvalId = null;
+    window.__avalixEdicaoAberta = false;
     paintList(container);
   }
 
@@ -9043,12 +9071,14 @@ function pode(acao) {
     currentMode = 'editor';
     currentAvalId = avalId;
     editorDirty = false;
+    window.__avalixEdicaoAberta = !!canEdit;
     paintEditor(container, canEdit);
   }
 
   function backToList(container) {
     currentMode = 'list';
     currentAvalId = null;
+    window.__avalixEdicaoAberta = false;
     paintList(container);
   }
 
@@ -11383,7 +11413,7 @@ function pode(acao) {
     const cfg    = config_get();
     const turma  = aluno.turmaId ? turma_get(aluno.turmaId) : null;
     const supP   = aluno.supervisorPadraoId ? users_get(aluno.supervisorPadraoId) : null;
-    const avals  = avaliacoes_list().filter(a => a.alunoId === aluno.id);
+    const avals  = avaliacoes_list().filter(a => a.alunoId === aluno.id && (a.status === 'finalizada' || avaliacao_temConteudo(a)));
 
     /* Agrupar avaliações por cenário */
     const cenMap = {};
