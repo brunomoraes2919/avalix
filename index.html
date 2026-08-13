@@ -4342,6 +4342,34 @@ function cenario_materiaInfo(cenarioId) {
   return null;
 }
 
+/* Versão correta de cenario_materiaInfo para uma FICHA específica: um
+   mesmo cenário pode estar vinculado a mais de uma matéria (às vezes
+   até de semestres diferentes) — "cenario_materiaInfo" sozinha não
+   tem como saber qual delas é a certa, e pegava sempre a primeira que
+   encontrasse pela frente, o que podia fazer a ficha "sumir" pra quem
+   estava vendo outro semestre. Fichas novas já gravam a matéria
+   escolhida direto (av.materiaId); para fichas antigas, sem esse
+   campo, usa o semestre em que o aluno está matriculado pra desempatar. */
+function avaliacao_materiaInfo(av) {
+  if (av.materiaId) {
+    const m = materia_get(av.materiaId);
+    if (m) {
+      const mc = (m.cenarios || []).find(c => c.cenarioId === av.cenarioId);
+      return { materia: m, peso: mc ? mc.peso : null };
+    }
+  }
+  const candidatas = materias_list()
+    .map(m => ({ materia: m, mc: (m.cenarios || []).find(c => c.cenarioId === av.cenarioId) }))
+    .filter(x => x.mc);
+  if (candidatas.length === 0) return null;
+  if (candidatas.length > 1) {
+    const aluno = alunos_get(av.alunoId);
+    const doSemestreDoAluno = aluno && candidatas.find(x => (aluno.semestresIds || []).includes(x.materia.semestreId));
+    if (doSemestreDoAluno) return { materia: doSemestreDoAluno.materia, peso: doSemestreDoAluno.mc.peso };
+  }
+  return { materia: candidatas[0].materia, peso: candidatas[0].mc.peso };
+}
+
 /* Calcula nota final da matéria para um aluno */
 function calc_materia(materiaId, alunoId) {
   const materia = materia_get(materiaId);
@@ -4393,7 +4421,7 @@ function calc_materia(materiaId, alunoId) {
 ═══════════════════════════════════════════════════════════════ */
 function avaliacao_conceitoEfetivo(av) {
   const cfg = config_get();
-  const matInfo = cenario_materiaInfo(av.cenarioId);
+  const matInfo = avaliacao_materiaInfo(av);
   if (!matInfo) {
     // Cenário órfão — usa nota do próprio cenário
     const c = calc_avaliacao(av);
@@ -4409,7 +4437,7 @@ function avaliacao_conceitoEfetivo(av) {
 
 /* Retorna { materia, peso, calc } ou null se não houver matéria */
 function avaliacao_materiaCalc(av) {
-  const matInfo = cenario_materiaInfo(av.cenarioId);
+  const matInfo = avaliacao_materiaInfo(av);
   if (!matInfo) return null;
   return {
     materia: matInfo.materia,
@@ -4512,6 +4540,14 @@ function avaliacoes_create(payload) {
     id: uid('aval'),
     alunoId: payload.alunoId,
     cenarioId: payload.cenarioId,
+    /* Grava a matéria escolhida no momento da criação — sem isso, a
+       matéria da ficha tinha que ser adivinhada depois a partir só do
+       cenário, e um mesmo cenário pode estar vinculado a mais de uma
+       matéria (inclusive de semestres diferentes). Nesse caso, a
+       ficha podia "parecer" pertencer à matéria errada — e sumir da
+       lista de quem estava vendo outro semestre, mesmo tendo sido
+       criada certinho. */
+    materiaId: payload.materiaId || null,
     supervisorPrincipalId: payload.supervisorPrincipalId,
     supervisoresCompartilhadosIds: compartilhadosIds,
     notas: payload.notas || avaliacoes_blankNotas(payload.cenarioId),
@@ -8678,7 +8714,7 @@ function pode(acao) {
        continuam sempre visíveis — não têm como ser escopados). */
     const _materiasSemestreIds = new Set(materias_doSemestreAtual().map(m => m.id));
     lista = lista.filter(a => {
-      const matInfo = cenario_materiaInfo(a.cenarioId);
+      const matInfo = avaliacao_materiaInfo(a);
       return !matInfo || _materiasSemestreIds.has(matInfo.materia.id);
     });
     const totalAposSemestre = lista.length;
@@ -8688,7 +8724,7 @@ function pode(acao) {
       lista = lista.filter(a => {
         const aluno = alunos_get(a.alunoId);
         const nomeAluno = aluno ? aluno.nome.toLowerCase() : '';
-        const matInfo = cenario_materiaInfo(a.cenarioId);
+        const matInfo = avaliacao_materiaInfo(a);
         const nomeMateria = matInfo ? matInfo.materia.nome.toLowerCase() : '';
         return nomeAluno.includes(listSearch)
           || avaliacao_cenarioNome(a).toLowerCase().includes(listSearch)
@@ -8733,7 +8769,7 @@ function pode(acao) {
     const grupoMap = {};
     const gruposOrdem = [];
     lista.forEach(av => {
-      const matInfo = cenario_materiaInfo(av.cenarioId);
+      const matInfo = avaliacao_materiaInfo(av);
       const materiaId = matInfo ? matInfo.materia.id : '__orphan__' + av.cenarioId;
       const key = av.alunoId + '||' + materiaId;
       if (!grupoMap[key]) {
@@ -9276,7 +9312,7 @@ function pode(acao) {
       if (!principalId) { $('#f-nf-supervisor-principal', overlay).classList.add('has-error'); return; }
 
       const res = avaliacoes_create({
-        alunoId, cenarioId,
+        alunoId, cenarioId, materiaId: matId,
         supervisorPrincipalId: principalId,
         supervisoresCompartilhadosIds: sharedIds
       });
@@ -9891,7 +9927,7 @@ function pode(acao) {
        matéria, continuam entrando nas estatísticas). */
     const _matSemestreIdsDash = new Set(materias_doSemestreAtual().map(m => m.id));
     avaliacoes = avaliacoes.filter(a => {
-      const matInfo = cenario_materiaInfo(a.cenarioId);
+      const matInfo = avaliacao_materiaInfo(a);
       return !matInfo || _matSemestreIdsDash.has(matInfo.materia.id);
     });
     const finalizadas = avaliacoes.filter(a => a.status === 'finalizada');
@@ -10261,7 +10297,7 @@ function pode(acao) {
        selecionado (cenários órfãos, sem matéria, continuam visíveis). */
     const _matSemestreIdsRel1 = new Set(materias_doSemestreAtual().map(m => m.id));
     lista = lista.filter(a => {
-      const matInfo = cenario_materiaInfo(a.cenarioId);
+      const matInfo = avaliacao_materiaInfo(a);
       return !matInfo || _matSemestreIdsRel1.has(matInfo.materia.id);
     });
 
@@ -10344,7 +10380,7 @@ function pode(acao) {
        selecionado (cenários órfãos, sem matéria, continuam visíveis). */
     const _matSemestreIdsRel2 = new Set(materias_doSemestreAtual().map(m => m.id));
     lista = lista.filter(a => {
-      const matInfo = cenario_materiaInfo(a.cenarioId);
+      const matInfo = avaliacao_materiaInfo(a);
       return !matInfo || _matSemestreIdsRel2.has(matInfo.materia.id);
     });
 
