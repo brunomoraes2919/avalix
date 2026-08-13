@@ -58,6 +58,11 @@
   }
 
   function renderGame(container) {
+    if (window.FisioGameOnline) {
+      window.FisioGameOnline.start();
+      window.FisioGameOnline.render(container);
+      return;
+    }
     container.innerHTML = '<style>' + styles + '</style><div class="fg-game-frame">' +
       '<div class="fg-framebar"><div><span class="fg-live-dot"></span><b>Beta fechado</b><span>Acesso liberado nesta sessão</span></div><button class="btn btn-ghost btn-sm" id="fgLock"><i class="ti ti-lock"></i> Bloquear acesso</button></div>' +
       '<iframe title="FisioGame — beta fechado" src="fisiogame.html"></iframe></div>';

@@ -1555,7 +1555,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
       <button class="btn btn-ghost btn-block btn-sm" id="logoutBtn" style="margin-top:10px;color:var(--ac-sand);border-color:rgba(246,243,236,0.25);">
         <i class="ti ti-logout"></i> Sair
       </button>
-      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-13 Â· v28-beta</div>
+      <div style="text-align:center;margin-top:8px;font-size:10.5px;color:rgba(246,243,236,0.35);" title="Confirma qual versão do arquivo está publicada">build 2026-08-13 Â· v29-multiplayer</div>
     </div>
   </aside>
 
@@ -11222,6 +11222,7 @@ function pode(acao) {
   }
 
   function exitApp() {
+    if (window.FisioGameOnline) window.FisioGameOnline.stop();
     $('#screen-app').classList.add('hidden');
     $('#screen-login').classList.remove('hidden');
     $('#loginForm').reset();
@@ -13665,6 +13666,7 @@ function pode(acao) {
 </script>
 
 <script src="aluno-primeiro-acesso.js"></script>
+<script src="fisio-online.js"></script>
 <script src="fisio-beta.js"></script>
 </body>
 </html>
