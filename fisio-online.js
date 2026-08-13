@@ -227,7 +227,7 @@
   function repaintIfOpen() {
     var active = document.querySelector('.nav-item.active');
     var container = document.getElementById('viewContent');
-    if (active && active.dataset.view === 'jogar' && container && !container.querySelector('.fg-game-frame')) renderView(container);
+    if (active && active.dataset.view === 'jogar' && container && !container.querySelector('.fg-game-frame') && !container.querySelector('.fg-chat')) renderView(container);
   }
 
   function start() {
