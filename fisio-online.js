@@ -303,6 +303,69 @@
     if (active && active.dataset.view === 'jogar' && container && !container.querySelector('.fg-game-frame') && !container.querySelector('.fg-chat') && !container.querySelector('.fg-play')) renderView(container);
   }
 
+  function renderAdminDashboard(container) {
+    var s = current();
+    if (!container || !s || s.papel !== 'admin') return;
+    var token = String(Date.now()) + Math.random();
+    container.dataset.gameDashboardToken = token;
+
+    function statusLabel(status) {
+      return status === 'pausada' ? 'Pausada' : status === 'aguardando' ? 'Aguardando' : 'Em andamento';
+    }
+    function dateLabel(value) {
+      if (!value) return 'Sem registro';
+      var d = new Date(value);
+      if (isNaN(d.getTime())) return 'Sem registro';
+      return d.toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    }
+    function stateOf(match) {
+      if (!match || !match.estado) return {};
+      if (typeof match.estado !== 'string') return match.estado;
+      try { return JSON.parse(match.estado); } catch (e) { return {}; }
+    }
+    function onlineFrom(rows) {
+      var map = {};
+      (rows || []).forEach(function (p) {
+        map[p.user_id] = Date.now() - new Date(p.ultimo_sinal).getTime() < ONLINE_MS;
+      });
+      return map;
+    }
+    function draw(activeMatches, presenceRows) {
+      if (!container.isConnected || container.dataset.gameDashboardToken !== token) return;
+      var online = onlineFrom(presenceRows);
+      var players = {};
+      (activeMatches || []).forEach(function (m) {
+        players[m.jogador_1_id] = true;
+        players[m.jogador_2_id] = true;
+      });
+      var onlineCount = Object.keys(players).filter(function (id) { return online[id]; }).length;
+      var waitingCount = (activeMatches || []).filter(function (m) { return !online[m.turno_id]; }).length;
+      container.innerHTML = '<style>'+adminDashboardStyles+'</style><section class="fg-admin-dash">' +
+        '<div class="fg-admin-head"><div><span class="eyebrow">FISIOGAME EM TEMPO REAL</span><h3>Partidas em andamento</h3><p>Atualização automática a cada 10 segundos. Visível somente para administradores.</p></div><span class="fg-live"><i></i> Ao vivo</span></div>' +
+        '<div class="fg-admin-metrics"><div><i class="ti ti-swords"></i><b>'+(activeMatches || []).length+'</b><span>Partidas abertas</span></div><div><i class="ti ti-users"></i><b>'+Object.keys(players).length+'</b><span>Jogadores envolvidos</span></div><div><i class="ti ti-wifi"></i><b>'+onlineCount+'</b><span>Jogadores online</span></div><div><i class="ti ti-clock-pause"></i><b>'+waitingCount+'</b><span>Aguardando jogador offline</span></div></div>' +
+        '<div class="fg-admin-list">' + ((activeMatches || []).length ? (activeMatches || []).map(function (m) {
+          var state = stateOf(m);
+          var turnName = m.turno_id === m.jogador_1_id ? m.jogador_1_nome : m.jogador_2_nome;
+          function player(id, name) { return '<div class="fg-admin-player"><i class="'+(online[id]?'on':'off')+'"></i><span>'+esc(name)+'</span><small>'+(online[id]?'Online':'Offline')+'</small></div>'; }
+          return '<article class="fg-admin-match"><div class="fg-admin-versus">'+player(m.jogador_1_id,m.jogador_1_nome)+'<strong>×</strong>'+player(m.jogador_2_id,m.jogador_2_nome)+'</div><div class="fg-admin-info"><span class="fg-admin-status '+esc(m.status)+'">'+statusLabel(m.status)+'</span><b>Vez de '+esc(turnName)+'</b><small>Rodada '+esc(state.rodada || 1)+' · atualização '+dateLabel(m.atualizado_em)+'</small></div></article>';
+        }).join('') : '<div class="fg-admin-empty"><i class="ti ti-device-gamepad-2"></i><b>Nenhuma partida acontecendo agora</b><span>As partidas aparecerão aqui assim que um convite for aceito.</span></div>') + '</div></section>';
+    }
+    function load() {
+      if (!container.isConnected || container.dataset.gameDashboardToken !== token) return;
+      Promise.all([
+        api('/rest/v1/avalix_partidas?status=in.(ativa,pausada,aguardando)&order=atualizado_em.desc&select=*'),
+        api('/rest/v1/avalix_presenca?select=user_id,ultimo_sinal')
+      ]).then(function (result) {
+        draw(result[0] || [], result[1] || []);
+      }).catch(function () {
+        if (container.isConnected) container.innerHTML = '<div class="card card-pad"><b>Nao foi possivel carregar as partidas.</b><p style="margin:6px 0 0;color:var(--ac-charcoal-soft);">Verifique a conexao com o Supabase.</p></div>';
+      }).then(function () {
+        if (container.isConnected && container.dataset.gameDashboardToken === token) setTimeout(load, 10000);
+      });
+    }
+    load();
+  }
+
   function start() {
     if (running || !allowed()) return;
     running = true;
@@ -324,10 +387,12 @@
   var gameStyles='.fg-play{max-width:900px;margin:auto}.fg-play-head,.fg-score{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid rgba(30,50,45,.1);padding:13px;border-radius:15px;margin-bottom:12px}.fg-play-head>div{display:grid;flex:1}.fg-play-head span{font-size:11px;color:var(--ac-charcoal-soft)}.fg-turn{padding:7px 10px!important;border-radius:999px;font-weight:700}.fg-turn.mine{background:#dceee9;color:#176354!important}.fg-turn.wait{background:#f2eee4;color:#76633d!important}.fg-score{justify-content:space-between}.fg-score>div{display:grid;gap:5px}.fg-score>div:last-child{text-align:right}.fg-seals{display:flex;gap:5px}.fg-seals i{width:14px;height:14px;border-radius:50%}.fg-question,.fg-wait{background:#fff;border:1px solid rgba(30,50,45,.1);border-radius:20px;padding:clamp(20px,4vw,38px)}.fg-category{display:inline-block;color:#fff;background:var(--cat);border-radius:999px;padding:6px 10px;font-size:11px;font-weight:800}.fg-question h2{margin:15px 0 22px}.fg-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}.fg-options button{border:1px solid rgba(30,50,45,.15);background:#fff;border-radius:12px;padding:14px;text-align:left;cursor:pointer;font-weight:600}.fg-options button:hover{border-color:#338f75;background:#edf7f4}.fg-wait{text-align:center;padding:60px 25px}.fg-wait>i{font-size:48px;color:#9b8a61}@media(max-width:600px){.fg-options{grid-template-columns:1fr}.fg-play-head{align-items:flex-start;flex-wrap:wrap}.fg-turn{width:100%;text-align:center}}';
   var chatStyles='.fg-person-actions{display:flex;gap:6px}.fg-chat{height:calc(100vh - 145px);min-height:560px;display:flex;flex-direction:column;max-width:860px;margin:auto;background:#fff;border:1px solid rgba(30,50,45,.1);border-radius:18px;overflow:hidden}.fg-chat-head{display:flex;align-items:center;gap:10px;padding:13px;border-bottom:1px solid rgba(30,50,45,.1)}.fg-chat-head .fg-avatar{width:40px;height:40px}.fg-chat-head>div:nth-child(3){display:grid;flex:1}.fg-chat-head span{font-size:11px;color:var(--ac-charcoal-soft)}.fg-chat-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:9px;background:#f7f8f7}.fg-message{max-width:74%;padding:9px 12px;border-radius:14px;background:#fff;align-self:flex-start;display:grid}.fg-message.mine{align-self:flex-end;background:#dceee9}.fg-message.event{align-self:center;max-width:90%;background:#fff8e8;text-align:center}.fg-message small{font-size:9px;color:var(--ac-charcoal-soft);margin-top:4px}.fg-chat-form{display:flex;gap:8px;padding:12px;border-top:1px solid rgba(30,50,45,.1)}.fg-chat-form input{flex:1}';
 
+  var adminDashboardStyles='.fg-admin-dash{background:#fff;border:1px solid rgba(30,50,45,.1);border-radius:18px;padding:clamp(16px,3vw,26px)}.fg-admin-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}.fg-admin-head h3{margin:3px 0 4px}.fg-admin-head p{margin:0;color:var(--ac-charcoal-soft);font-size:12px}.fg-live{display:flex;align-items:center;gap:7px;background:#e8f6ef;color:#187347;border-radius:999px;padding:7px 11px;font-size:11px;font-weight:800;white-space:nowrap}.fg-live i{width:8px;height:8px;border-radius:50%;background:#27ae60;box-shadow:0 0 0 4px rgba(39,174,96,.13)}.fg-admin-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px}.fg-admin-metrics>div{border:1px solid rgba(30,50,45,.09);background:#f8faf9;border-radius:13px;padding:13px;display:grid;grid-template-columns:auto 1fr;column-gap:9px;align-items:center}.fg-admin-metrics i{font-size:20px;color:#267367;grid-row:1/3}.fg-admin-metrics b{font-size:22px;line-height:1}.fg-admin-metrics span{font-size:10px;color:var(--ac-charcoal-soft)}.fg-admin-list{display:grid;gap:9px}.fg-admin-match{display:flex;align-items:center;justify-content:space-between;gap:18px;border-top:1px solid rgba(30,50,45,.08);padding:14px 2px}.fg-admin-versus{display:flex;align-items:center;gap:13px;min-width:0}.fg-admin-versus>strong{color:var(--ac-charcoal-soft)}.fg-admin-player{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;align-items:center;min-width:0}.fg-admin-player>i{width:9px;height:9px;border-radius:50%;grid-row:1/3}.fg-admin-player>i.on{background:#27ae60}.fg-admin-player>i.off{background:#a9b1ad}.fg-admin-player span{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}.fg-admin-player small,.fg-admin-info small{font-size:10px;color:var(--ac-charcoal-soft)}.fg-admin-info{display:grid;text-align:right;justify-items:end;min-width:210px}.fg-admin-info b{font-size:12px}.fg-admin-status{font-size:9px;font-weight:800;text-transform:uppercase;color:#176354;background:#dceee9;padding:4px 7px;border-radius:999px;margin-bottom:3px}.fg-admin-status.pausada,.fg-admin-status.aguardando{color:#76633d;background:#f2eee4}.fg-admin-empty{text-align:center;padding:34px 15px;display:grid;gap:5px;color:var(--ac-charcoal-soft)}.fg-admin-empty i{font-size:34px;opacity:.45}.fg-admin-empty b{color:var(--ac-charcoal)}@media(max-width:850px){.fg-admin-metrics{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){.fg-admin-head,.fg-admin-match{align-items:stretch;flex-direction:column}.fg-admin-info{text-align:left;justify-items:start;min-width:0}.fg-admin-versus{justify-content:space-between}.fg-admin-player span{max-width:110px}}';
+
   var styles = '\
 .fg-shell{display:grid;gap:18px;max-width:1180px;margin:0 auto}.fg-hero{background:linear-gradient(135deg,#173f3a,#246b5f);color:#fff;border-radius:22px;padding:clamp(22px,4vw,42px);display:flex;align-items:end;justify-content:space-between;gap:24px;box-shadow:0 16px 40px rgba(23,63,58,.18)}.fg-hero h2{font-size:clamp(26px,4vw,44px);line-height:1.06;max-width:720px;margin:8px 0 10px;color:#fff}.fg-hero p{margin:0;color:rgba(255,255,255,.78);max-width:650px}.fg-kicker{font:700 11px/1.2 Inter,sans-serif;letter-spacing:.16em;color:#e7bf72}.fg-community,.fg-invites{background:var(--ac-white,#fff);border:1px solid rgba(30,50,45,.1);border-radius:18px;padding:clamp(16px,3vw,26px)}.fg-section-head{display:flex;align-items:end;justify-content:space-between;gap:18px;margin-bottom:14px}.fg-section-head h3,.fg-invites h3{margin:3px 0 0}.fg-search{display:flex;align-items:center;gap:7px;border:1px solid rgba(30,50,45,.18);border-radius:10px;padding:0 10px;min-width:230px}.fg-search input{border:0!important;box-shadow:none!important;padding:9px 0!important;width:100%}.fg-legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--ac-charcoal-soft);margin-bottom:14px}.fg-dot,.fg-status{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}.fg-dot.on,.fg-status.on{background:#27ae60;box-shadow:0 0 0 3px rgba(39,174,96,.14)}.fg-dot.off,.fg-status.off{background:#a9b1ad}.fg-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.fg-person{display:flex;align-items:center;gap:12px;border:1px solid rgba(30,50,45,.09);border-radius:14px;padding:12px;background:#fff}.fg-avatar{width:46px;height:46px;min-width:46px;min-height:46px;max-width:46px;max-height:46px;aspect-ratio:1/1;border-radius:50%;background:#e8f0ed;color:#1b594f;display:grid;place-items:center;font-weight:800;position:relative;flex:0 0 46px;overflow:visible}.fg-avatar img{display:block;position:absolute;inset:0;width:46px!important;height:46px!important;min-width:46px;min-height:46px;max-width:46px;max-height:46px;aspect-ratio:1/1;border-radius:50%!important;object-fit:cover!important;object-position:center}.fg-status{position:absolute;right:-1px;bottom:1px;margin:0;border:2px solid #fff;width:11px;height:11px}.fg-person-copy{display:grid;min-width:0;flex:1}.fg-person-copy b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fg-person-copy span{font-size:12px;color:var(--ac-charcoal-soft)}.fg-invites{border-color:rgba(231,191,114,.5);background:#fffdf7}.fg-invite{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 0;border-top:1px solid rgba(30,50,45,.08)}.fg-invite>div:first-child{display:grid}.fg-invite span{font-size:13px;color:var(--ac-charcoal-soft)}.fg-invite>div:last-child{display:flex;gap:7px}.fg-empty{text-align:center;padding:32px;color:var(--ac-charcoal-soft);grid-column:1/-1}.fg-game-frame{height:calc(100vh - 118px);min-height:620px;display:flex;flex-direction:column}.fg-framebar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 0 10px;font-size:12px;color:var(--ac-charcoal-soft)}.fg-game-frame iframe{width:100%;flex:1;border:0;border-radius:18px;background:#f4f1e9}.fg-match{max-width:680px;margin:50px auto;text-align:center;background:#fff;border-radius:22px;padding:48px 28px;border:1px solid rgba(30,50,45,.1)}.fg-match-icon{width:74px;height:74px;border-radius:50%;display:grid;place-items:center;margin:0 auto 18px;background:#e7f1ee;color:#1f655a;font-size:36px}.fg-match h2{margin:9px 0}.fg-match p{color:var(--ac-charcoal-soft);margin-bottom:24px}@media(max-width:760px){.fg-hero{align-items:stretch;flex-direction:column}.fg-hero .btn{width:100%}.fg-grid{grid-template-columns:1fr}.fg-section-head{align-items:stretch;flex-direction:column}.fg-search{min-width:0}.fg-person{padding:10px}.fg-invite{align-items:flex-start;flex-direction:column}.fg-game-frame{height:calc(100vh - 92px);min-height:520px}.fg-framebar span{display:none}}';
 
   window.AvaliaClinViews = window.AvaliaClinViews || {};
-  window.FisioGameOnline = { start:start, stop:stop, render:renderView, refresh:function(){return Promise.all([loadPresence(),loadInvites()]);} };
+  window.FisioGameOnline = { start:start, stop:stop, render:renderView, renderAdminDashboard:renderAdminDashboard, refresh:function(){return Promise.all([loadPresence(),loadInvites()]);} };
   window.addEventListener('beforeunload', function () { if (running) heartbeat(true); });
 })();

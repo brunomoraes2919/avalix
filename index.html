@@ -10031,12 +10031,23 @@ function pode(acao) {
           <div id="estruturaResumo"></div>
         </div>
       </div>
+      ${session && session.papel === 'admin' ? `
+        <div id="adminGameDashboard" style="margin-top:1.25rem;">
+          <div class="card card-pad" style="text-align:center;color:var(--ac-charcoal-soft);">
+            <i class="ti ti-loader-2" style="font-size:24px;"></i>
+            <p style="margin:8px 0 0;">Carregando partidas do FisioGame...</p>
+          </div>
+        </div>
+      ` : ''}
     `;
 
     paintAptosChart(container, aptos, inaptos);
     paintDistribuicaoChart(container, calculadas);
     paintRecentList(container, avaliacoes.slice(0, 6));
     paintEstruturaResumo(container);
+    if (session && session.papel === 'admin' && window.FisioGameOnline && window.FisioGameOnline.renderAdminDashboard) {
+      window.FisioGameOnline.renderAdminDashboard($('#adminGameDashboard', container));
+    }
 
     $('#btnVerTodasFichas', container).addEventListener('click', () => {
       if (window.AvaliaClinNavigate) AvaliaClinNavigate('avaliacoes');
