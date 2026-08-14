@@ -7,6 +7,8 @@
   var invites = [];
   var conversations = [];
   var matches = [];
+  var gameProfile = null;
+  var gameRanking = [];
   var ONLINE_MS = 45000;
   var GAME_CATEGORIES = [
     {id:'anatomia',name:'Anatomia',color:'#d96b5f'}, {id:'cinesio',name:'Cinesiologia',color:'#d8a83e'},
@@ -58,6 +60,89 @@
       if (r.status === 204) return null;
       return r.text().then(function (t) { return t ? JSON.parse(t) : null; });
     });
+  }
+
+  var ACHIEVEMENTS = [
+    {id:'primeiro_passo',icon:'ti-sparkles',name:'Primeiro passo',desc:'Responda sua primeira pergunta.',test:function(p){return p.perguntas>=1;}},
+    {id:'mente_afiada',icon:'ti-brain',name:'Mente afiada',desc:'Acerte 10 perguntas.',test:function(p){return p.acertos>=10;}},
+    {id:'em_chamas',icon:'ti-flame',name:'Em chamas',desc:'Estude por 3 dias seguidos.',test:function(p){return p.sequencia_dias>=3;}},
+    {id:'primeira_vitoria',icon:'ti-trophy',name:'Primeira vitória',desc:'Vença sua primeira partida.',test:function(p){return p.vitorias>=1;}},
+    {id:'residente',icon:'ti-stethoscope',name:'Residente FisioGame',desc:'Alcance o nível 5.',test:function(p){return levelOf(p.xp)>=5;}},
+    {id:'especialista',icon:'ti-award',name:'Especialista',desc:'Acerte 50 perguntas.',test:function(p){return p.acertos>=50;}},
+    {id:'invicto',icon:'ti-crown',name:'Sequência de vitórias',desc:'Vença 5 partidas.',test:function(p){return p.vitorias>=5;}},
+    {id:'veterano',icon:'ti-shield-check',name:'Veterano clínico',desc:'Conclua 20 partidas.',test:function(p){return p.partidas>=20;}}
+  ];
+
+  function levelOf(xp) { return Math.max(1, Math.floor(Math.sqrt(Math.max(0, Number(xp)||0) / 100)) + 1); }
+  function levelStart(level) { return Math.pow(Math.max(0, level-1), 2) * 100; }
+  function levelEnd(level) { return Math.pow(level, 2) * 100; }
+  function todayKey() { return new Date().toISOString().slice(0,10); }
+  function seasonKey() { return todayKey().slice(0,7); }
+  function turmaAtualId() {
+    var s=current(), db=typeof db_load==='function'?db_load():{};
+    if(!s || s.papel!=='aluno') return null;
+    var aluno=(db.alunos||[]).find(function(a){return a.id===s.id || a.id===s.alunoId;});
+    return aluno ? (aluno.turmaId || null) : null;
+  }
+  function defaultProfile() {
+    var s=current();
+    return {user_id:s.id,nome:s.nome,papel:s.papel,turma_id:turmaAtualId(),xp:0,moedas:0,perguntas:0,acertos:0,partidas:0,vitorias:0,derrotas:0,desistencias:0,sequencia_dias:0,ultimo_dia:null,temporada_id:seasonKey(),temporada_pontos:0,estatisticas:{},conquistas:[],missoes:{dia:todayKey(),respostas:0,acertos:0,partidas:0}};
+  }
+  function normalizeProfile(p) {
+    p=Object.assign(defaultProfile(),p||{});
+    if(typeof p.estatisticas==='string'){try{p.estatisticas=JSON.parse(p.estatisticas);}catch(e){p.estatisticas={};}}
+    if(typeof p.conquistas==='string'){try{p.conquistas=JSON.parse(p.conquistas);}catch(e){p.conquistas=[];}}
+    if(typeof p.missoes==='string'){try{p.missoes=JSON.parse(p.missoes);}catch(e){p.missoes={};}}
+    if(!Array.isArray(p.conquistas))p.conquistas=[];
+    if(!p.missoes || p.missoes.dia!==todayKey())p.missoes={dia:todayKey(),respostas:0,acertos:0,partidas:0};
+    if(p.temporada_id!==seasonKey()){p.temporada_id=seasonKey();p.temporada_pontos=0;}
+    return p;
+  }
+  function unlockAchievements(p) {
+    var unlocked=[];
+    ACHIEVEMENTS.forEach(function(a){if(a.test(p)&&p.conquistas.indexOf(a.id)<0){p.conquistas.push(a.id);unlocked.push(a);}});
+    return unlocked;
+  }
+  function saveProfile(p) {
+    p=normalizeProfile(p); p.nome=current().nome; p.papel=current().papel; p.turma_id=turmaAtualId(); p.atualizado_em=new Date().toISOString();
+    gameProfile=p;
+    return api('/rest/v1/avalix_jogo_perfis?on_conflict=user_id',{method:'POST',headers:{'Prefer':'resolution=merge-duplicates,return=representation'},body:JSON.stringify(p)}).then(function(rows){gameProfile=normalizeProfile(rows&&rows[0]||p);return gameProfile;});
+  }
+  function loadGameProfile() {
+    var s=current(); if(!s)return Promise.resolve(null);
+    return api('/rest/v1/avalix_jogo_perfis?user_id=eq.'+encodeURIComponent(s.id)+'&select=*').then(function(rows){
+      if(rows&&rows[0]){gameProfile=normalizeProfile(rows[0]);return gameProfile;}
+      return saveProfile(defaultProfile());
+    }).catch(function(){gameProfile=normalizeProfile(gameProfile||defaultProfile());return gameProfile;});
+  }
+  function loadRanking() {
+    return api('/rest/v1/avalix_jogo_perfis?temporada_id=eq.'+encodeURIComponent(seasonKey())+'&order=temporada_pontos.desc,xp.desc&limit=100&select=*').then(function(rows){gameRanking=(rows||[]).map(normalizeProfile);return gameRanking;}).catch(function(){return gameRanking;});
+  }
+  function recordAnswer(correct,category,won,opponentId) {
+    return loadGameProfile().then(function(p){
+      var yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10), today=todayKey();
+      if(p.ultimo_dia!==today){p.sequencia_dias=p.ultimo_dia===yesterday?(p.sequencia_dias||0)+1:1;p.ultimo_dia=today;}
+      p.perguntas++; p.missoes.respostas=(p.missoes.respostas||0)+1;
+      p.estatisticas[category]=p.estatisticas[category]||{perguntas:0,acertos:0}; p.estatisticas[category].perguntas++;
+      p.xp+=correct?25:8; p.temporada_pontos+=correct?10:2; p.moedas+=correct?5:1;
+      if(correct){p.acertos++;p.missoes.acertos=(p.missoes.acertos||0)+1;p.estatisticas[category].acertos++;}
+      if(won){p.vitorias++;p.partidas++;p.missoes.partidas=(p.missoes.partidas||0)+1;p.xp+=100;p.temporada_pontos+=50;p.moedas+=30;}
+      if(p.missoes.respostas>=5&&!p.missoes.premio_respostas){p.missoes.premio_respostas=true;p.xp+=25;p.moedas+=10;}
+      if(p.missoes.acertos>=3&&!p.missoes.premio_acertos){p.missoes.premio_acertos=true;p.xp+=35;p.moedas+=15;}
+      if(p.missoes.partidas>=1&&!p.missoes.premio_partida){p.missoes.premio_partida=true;p.xp+=50;p.moedas+=20;}
+      var unlocked=unlockAchievements(p);
+      return saveProfile(p).then(function(saved){
+        if(unlocked.length&&window.showToast)showToast('Conquista desbloqueada: '+unlocked[0].name+'!','success');
+        if(won&&opponentId)recordOpponentLoss(opponentId);
+        return saved;
+      });
+    });
+  }
+  function recordOpponentLoss(userId) {
+    api('/rest/v1/avalix_jogo_perfis?user_id=eq.'+encodeURIComponent(userId)+'&select=*').then(function(rows){
+      if(!rows||!rows[0])return; var p=normalizeProfile(rows[0]);p.derrotas++;p.partidas++;p.atualizado_em=new Date().toISOString();
+      return api('/rest/v1/avalix_jogo_perfis?user_id=eq.'+encodeURIComponent(userId),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({derrotas:p.derrotas,partidas:p.partidas,atualizado_em:p.atualizado_em})});
+    }).catch(function(){});
   }
 
   function colleagues() {
@@ -237,6 +322,40 @@
 
   function roleLabel(role) { return role === 'aluno' ? 'Aluno' : role === 'professor' ? 'Professor' : 'Administrador'; }
 
+  function gameNav(active) {
+    return '<nav class="fg-game-nav" aria-label="Navegação do FisioGame">'+[
+      ['home','ti-home','Jogar'],['ranking','ti-trophy','Ranking'],['perfil','ti-user-circle','Meu perfil'],['conquistas','ti-medal','Conquistas']
+    ].map(function(item){return '<button class="'+(active===item[0]?'active':'')+'" data-game-view="'+item[0]+'"><i class="ti '+item[1]+'"></i><span>'+item[2]+'</span></button>';}).join('')+'</nav>';
+  }
+  function bindGameNav(container) {
+    container.querySelectorAll('[data-game-view]').forEach(function(btn){btn.onclick=function(){var v=btn.dataset.gameView;if(v==='home')renderView(container);else if(v==='ranking')renderRanking(container);else if(v==='perfil')renderProfile(container);else renderAchievements(container);};});
+  }
+  function profileStrip(p) {
+    var level=levelOf(p.xp), start=levelStart(level), end=levelEnd(level), pct=Math.max(0,Math.min(100,((p.xp-start)/(end-start))*100));
+    return '<section class="fg-profile-strip"><div class="fg-level-orb"><span>NÍVEL</span><b>'+level+'</b></div><div class="fg-profile-progress"><div><b>'+esc(p.nome)+'</b><span>'+p.xp+' XP · '+p.temporada_pontos+' pontos na temporada</span></div><div class="fg-xp-track"><i style="width:'+pct+'%"></i></div></div><div class="fg-currency"><i class="ti ti-coin"></i><b>'+p.moedas+'</b><span>moedas</span></div><div class="fg-streak"><i class="ti ti-flame"></i><b>'+p.sequencia_dias+'</b><span>dias</span></div></section>';
+  }
+  function missionsHtml(p) {
+    var missions=[{icon:'ti-message-question',name:'Aquecimento',now:p.missoes.respostas||0,goal:5,reward:25},{icon:'ti-bulb',name:'Mente clínica',now:p.missoes.acertos||0,goal:3,reward:35},{icon:'ti-swords',name:'Entrar em campo',now:p.missoes.partidas||0,goal:1,reward:50}];
+    return '<section class="fg-missions"><div class="fg-section-title"><div><span class="eyebrow">OBJETIVOS DE HOJE</span><h3>Missões diárias</h3></div><small>Renovam todos os dias</small></div><div class="fg-mission-grid">'+missions.map(function(m){var done=m.now>=m.goal,pct=Math.min(100,m.now/m.goal*100);return '<article class="fg-mission '+(done?'done':'')+'"><i class="ti '+(done?'ti-circle-check':m.icon)+'"></i><div><b>'+m.name+'</b><span>'+Math.min(m.now,m.goal)+' de '+m.goal+'</span><div><i style="width:'+pct+'%"></i></div></div><small>+'+m.reward+' XP</small></article>';}).join('')+'</div></section>';
+  }
+  function categoryPerformance(p) {
+    return GAME_CATEGORIES.map(function(c){var st=p.estatisticas[c.id]||{perguntas:0,acertos:0},pct=st.perguntas?Math.round(st.acertos/st.perguntas*100):0;return {cat:c,pct:pct,total:st.perguntas};}).sort(function(a,b){return b.pct-a.pct;});
+  }
+
+  function renderRanking(container) {
+    var p=normalizeProfile(gameProfile||defaultProfile());
+    container.innerHTML='<style>'+styles+progressStyles+'</style><div class="fg-shell">'+gameNav('ranking')+profileStrip(p)+'<section class="fg-page-card"><div class="fg-ranking-hero"><span class="eyebrow">TEMPORADA ATUAL</span><h2>Liga Acadêmica</h2><p>Ganhe pontos respondendo e vencendo partidas. A classificação é atualizada automaticamente.</p></div><div id="fgRankingList" class="fg-ranking-list"><div class="fg-empty">Carregando classificação...</div></div></section></div>';bindGameNav(container);
+    loadRanking().then(function(rows){if(!container.isConnected)return;var list=container.querySelector('#fgRankingList');list.innerHTML=rows.length?rows.map(function(r,i){var me=current()&&r.user_id===current().id;return '<article class="fg-rank-row '+(me?'me':'')+'"><strong>'+(i+1)+'</strong><div class="fg-rank-avatar">'+esc(initials(r.nome))+'</div><div><b>'+esc(r.nome)+'</b><span>Nível '+levelOf(r.xp)+' · '+roleLabel(r.papel)+'</span></div><em>'+r.temporada_pontos+' pts</em></article>';}).join(''):'<div class="fg-empty">O ranking será formado quando os jogadores começarem a responder.</div>';});
+  }
+  function renderProfile(container) {
+    var p=normalizeProfile(gameProfile||defaultProfile()), perf=categoryPerformance(p), best=perf[0], weak=perf.slice().reverse()[0], accuracy=p.perguntas?Math.round(p.acertos/p.perguntas*100):0;
+    container.innerHTML='<style>'+styles+progressStyles+'</style><div class="fg-shell">'+gameNav('perfil')+profileStrip(p)+'<section class="fg-page-card"><div class="fg-profile-hero"><div class="fg-big-avatar">'+esc(initials(p.nome))+'</div><div><span class="eyebrow">RESIDÊNCIA FISIOGAME</span><h2>'+esc(p.nome)+'</h2><p>'+roleLabel(p.papel)+' · Nível '+levelOf(p.xp)+'</p></div></div><div class="fg-stat-grid"><div><b>'+p.perguntas+'</b><span>Perguntas</span></div><div><b>'+accuracy+'%</b><span>Precisão</span></div><div><b>'+p.vitorias+'</b><span>Vitórias</span></div><div><b>'+p.partidas+'</b><span>Partidas</span></div></div><div class="fg-insights"><article class="best"><i class="ti ti-award"></i><div><span>Sua especialidade</span><b>'+(best&&best.total?esc(best.cat.name):'Continue jogando')+'</b><small>'+(best&&best.total?best.pct+'% de acertos':'Responda para descobrir')+'</small></div></article><article class="weak"><i class="ti ti-book-2"></i><div><span>Área para estudar</span><b>'+(weak&&weak.total?esc(weak.cat.name):'Ainda analisando')+'</b><small>'+(weak&&weak.total?weak.pct+'% de acertos':'Precisamos de mais respostas')+'</small></div></article></div><h3 class="fg-subtitle">Domínio por área</h3><div class="fg-mastery">'+perf.map(function(x){return '<div><span><i style="background:'+x.cat.color+'"></i>'+esc(x.cat.name)+'</span><div><i style="width:'+x.pct+'%;background:'+x.cat.color+'"></i></div><b>'+x.pct+'%</b></div>';}).join('')+'</div></section></div>';bindGameNav(container);
+  }
+  function renderAchievements(container) {
+    var p=normalizeProfile(gameProfile||defaultProfile());
+    container.innerHTML='<style>'+styles+progressStyles+'</style><div class="fg-shell">'+gameNav('conquistas')+profileStrip(p)+'<section class="fg-page-card"><div class="fg-ach-head"><span class="eyebrow">SUA JORNADA</span><h2>Conquistas</h2><p>'+p.conquistas.length+' de '+ACHIEVEMENTS.length+' desbloqueadas</p></div><div class="fg-ach-grid">'+ACHIEVEMENTS.map(function(a){var got=p.conquistas.indexOf(a.id)>=0;return '<article class="fg-ach '+(got?'unlocked':'locked')+'"><div><i class="ti '+(got?a.icon:'ti-lock')+'"></i></div><b>'+a.name+'</b><span>'+a.desc+'</span><small>'+(got?'CONQUISTADA':'BLOQUEADA')+'</small></article>';}).join('')+'</div></section></div>';bindGameNav(container);
+  }
+
   function renderView(container) {
     if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) {
       window.FisioGameBeta.render(container);
@@ -248,12 +367,16 @@
     }
     var received = pendingReceived();
     var people = colleagues();
-    container.innerHTML = '<style>' + styles + relockStyles + '</style><div class="fg-shell">' +
+    var p=normalizeProfile(gameProfile||defaultProfile());
+    container.innerHTML = '<style>' + styles + relockStyles + progressStyles + '</style><div class="fg-shell">' + gameNav('home') + profileStrip(p) +
       '<section class="fg-hero"><div><span class="fg-kicker">FISIOGAME ONLINE</span><h2>Aprenda, desafie e conquiste as 6 áreas.</h2><p>Convide alguém da comunidade Avalix ou treine sozinho enquanto espera.</p></div><div class="fg-hero-actions"><button class="btn btn-primary" id="fgSolo"><i class="ti ti-player-play"></i> Treinar sozinho</button><button class="btn fg-lock-btn" id="fgRelock"><i class="ti ti-lock"></i> Bloquear acesso</button></div></section>' +
+      missionsHtml(p) +
       (matches.length ? '<section class="fg-invites"><h3><i class="ti ti-swords"></i> Suas partidas</h3>'+matches.map(function(m){var s=current(),other=m.jogador_1_id===s.id?m.jogador_2_nome:m.jogador_1_nome,isTurn=m.turno_id===s.id;return '<div class="fg-invite"><div><b>'+esc(other)+'</b><span>'+(isTurn?'É sua vez de responder':'Aguardando a jogada do adversário')+'</span></div><button class="btn '+(isTurn?'btn-primary':'btn-ghost')+' btn-sm" data-match="'+esc(m.id)+'">Abrir partida</button></div>';}).join('')+'</section>' : '') +
       (received.length ? '<section class="fg-invites"><h3><i class="ti ti-mail-opened"></i> Convites recebidos</h3>' + received.map(function (i) { return '<div class="fg-invite"><div><b>' + esc(i.remetente_nome) + '</b><span>quer jogar uma partida com você</span></div><div><button class="btn btn-primary btn-sm" data-accept="' + esc(i.id) + '">Aceitar</button><button class="btn btn-ghost btn-sm" data-decline="' + esc(i.id) + '">Recusar</button></div></div>'; }).join('') + '</section>' : '') +
       '<section class="fg-community"><div class="fg-section-head"><div><span class="eyebrow">Comunidade</span><h3>Escolha seu adversário</h3></div><label class="fg-search"><i class="ti ti-search"></i><input id="fgSearch" placeholder="Buscar colega"></label></div>' +
       '<div class="fg-legend"><span><i class="fg-dot on"></i> Online agora</span><span><i class="fg-dot off"></i> Offline — receberá o convite ao entrar</span></div><div class="fg-grid" id="fgPeople"></div></section></div>';
+
+    bindGameNav(container);
 
     function paintPeople(filter) {
       var target = container.querySelector('#fgPeople');
@@ -290,9 +413,9 @@
   function renderMatch(match) {
     var container = document.getElementById('viewContent');
     if (!container) return;
-    var s=current(), state=typeof match.estado==='string'?JSON.parse(match.estado):match.estado||{}, q=GAME_QUESTIONS.find(function(x){return x.id===state.questao_id;})||pickQuestion(state.usadas), mine=match.jogador_1_id===s.id, mySeals=mine?(state.selos_1||[]):(state.selos_2||[]), otherSeals=mine?(state.selos_2||[]):(state.selos_1||[]), myTurn=match.turno_id===s.id, otherName=mine?match.jogador_2_nome:match.jogador_1_nome;
-    function seals(list){return GAME_CATEGORIES.map(function(c){return '<i title="'+esc(c.name)+'" style="background:'+(list.indexOf(c.id)>=0?c.color:'#dfe4e2')+'"></i>';}).join('');}
-    container.innerHTML='<style>'+styles+gameStyles+'</style><div class="fg-play"><div class="fg-play-head"><button class="btn btn-ghost btn-sm" id="fgReturn"><i class="ti ti-arrow-left"></i></button><div><b>Você × '+esc(otherName)+'</b><span>Rodada '+(state.rodada||1)+'</span></div><span class="fg-turn '+(myTurn?'mine':'wait')+'">'+(myTurn?'Sua vez':'Aguardando '+esc(otherName))+'</span></div><div class="fg-score"><div><b>Você</b><span class="fg-seals">'+seals(mySeals)+'</span></div><div><b>'+esc(otherName)+'</b><span class="fg-seals">'+seals(otherSeals)+'</span></div></div>'+(myTurn?'<div class="fg-question"><span class="fg-category" style="--cat:'+((GAME_CATEGORIES.find(function(c){return c.id===q.cat;})||{}).color||'#338f75')+'">'+esc((GAME_CATEGORIES.find(function(c){return c.id===q.cat;})||{}).name||q.cat)+'</span><h2>'+esc(q.q)+'</h2><div class="fg-options">'+q.a.map(function(a,i){return '<button data-answer="'+i+'">'+String.fromCharCode(65+i)+'. '+esc(a)+'</button>';}).join('')+'</div><div id="fgAnswerNote"></div></div>':'<div class="fg-wait"><i class="ti ti-clock-pause"></i><h2>A partida está aguardando.</h2><p>'+esc(otherName)+' pode responder quando voltar ao Avalix. Você receberá a vez depois da jogada dele.</p></div>')+'</div>';
+    var s=current(), state=typeof match.estado==='string'?JSON.parse(match.estado):match.estado||{}, q=GAME_QUESTIONS.find(function(x){return x.id===state.questao_id;})||pickQuestion(state.usadas), mine=match.jogador_1_id===s.id, mySeals=mine?(state.selos_1||[]):(state.selos_2||[]), otherSeals=mine?(state.selos_2||[]):(state.selos_1||[]), myTurn=match.turno_id===s.id, otherName=mine?match.jogador_2_nome:match.jogador_1_nome, category=GAME_CATEGORIES.find(function(c){return c.id===q.cat;})||GAME_CATEGORIES[0];
+    function sealBoard(list){return GAME_CATEGORIES.map(function(c){var got=list.indexOf(c.id)>=0;return '<div class="'+(got?'got':'')+'" title="'+esc(c.name)+'" style="--seal:'+c.color+'"><i class="ti '+(got?'ti-check':'ti-lock')+'"></i><span>'+esc(c.name.split(' ')[0])+'</span></div>';}).join('');}
+    container.innerHTML='<style>'+styles+gameStyles+'</style><div class="fg-play"><div class="fg-arena-top"><button class="fg-round-btn" id="fgReturn" aria-label="Voltar"><i class="ti ti-arrow-left"></i></button><div><span>RODADA '+(state.rodada||1)+'</span><b>Duelo clínico</b></div><span class="fg-turn '+(myTurn?'mine':'wait')+'">'+(myTurn?'SUA VEZ':'AGUARDANDO')+'</span></div><section class="fg-versus"><div><span class="fg-duel-avatar">'+esc(initials(s.nome))+'</span><b>Você</b><small>'+mySeals.length+' áreas</small></div><strong>'+mySeals.length+' <i>×</i> '+otherSeals.length+'</strong><div><span class="fg-duel-avatar opponent">'+esc(initials(otherName))+'</span><b>'+esc(otherName)+'</b><small>'+otherSeals.length+' áreas</small></div></section><section class="fg-objective"><div><span>Seu mapa de domínio</span><small>Conquiste as 6 áreas para vencer</small></div><div class="fg-seal-board">'+sealBoard(mySeals)+'</div></section>'+(myTurn?'<section class="fg-question-card" style="--category:'+category.color+'"><div class="fg-question-meta"><span><i class="ti ti-stethoscope"></i> '+esc(category.name)+'</span><em>+25 XP</em></div><div class="fg-question-index">DESAFIO '+(state.rodada||1)+'</div><h2>'+esc(q.q)+'</h2><div class="fg-options">'+q.a.map(function(a,i){return '<button data-answer="'+i+'"><span>'+String.fromCharCode(65+i)+'</span>'+esc(a)+'</button>';}).join('')+'</div><div id="fgAnswerNote"></div></section>':'<section class="fg-wait"><div class="fg-wait-pulse"><i class="ti ti-clock-pause"></i></div><span>PARTIDA ASSÍNCRONA</span><h2>Aguardando '+esc(otherName)+'</h2><p>A partida está salva. Você pode sair e voltar quando receber sua próxima vez.</p><div class="fg-wait-tip"><i class="ti ti-bulb"></i> Enquanto isso, complete suas missões no modo de treino.</div></section>')+'</div>';
     container.querySelector('#fgReturn').addEventListener('click', function () { renderView(container); });
     container.querySelectorAll('[data-answer]').forEach(function(btn){btn.onclick=function(){answerMatch(match,state,q,Number(btn.dataset.answer),container);};});
   }
@@ -304,14 +427,17 @@
     if(p1){state.selos_1=seals;if(correct)state.acertos_1=(state.acertos_1||0)+1;}else{state.selos_2=seals;if(correct)state.acertos_2=(state.acertos_2||0)+1;}
     var won=seals.length>=6, next=match.jogador_1_id===current().id?match.jogador_2_id:match.jogador_1_id, nq=pickQuestion(state.usadas||[]);
     state.usadas=(state.usadas||[]).concat([nq.id]); state.questao_id=nq.id; state.rodada=(state.rodada||1)+1; state.ultima_resposta={por:current().id,correta:correct,questao:q.id,em:new Date().toISOString()};
-    api('/rest/v1/avalix_partidas?id=eq.'+encodeURIComponent(match.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({estado:state,turno_id:next,status:won?'finalizada':'ativa',atualizado_em:new Date().toISOString()})}).then(function(){window.showToast&&showToast(correct?'Resposta correta! Área conquistada.':'Resposta incorreta. A vez passou para o adversário.',correct?'success':'warning');return loadMatches();}).then(function(){renderView(container);});
+    var opponentId=match.jogador_1_id===current().id?match.jogador_2_id:match.jogador_1_id;
+    var note=container.querySelector('#fgAnswerNote');
+    if(note)note.innerHTML='<div class="fg-answer-feedback '+(correct?'correct':'wrong')+'"><i class="ti '+(correct?'ti-circle-check':'ti-circle-x')+'"></i><div><b>'+(correct?'Resposta correta!':'Quase lá!')+'</b><span>'+esc(q.e||('A resposta correta é '+q.a[q.c]+'.'))+'</span></div></div>';
+    api('/rest/v1/avalix_partidas?id=eq.'+encodeURIComponent(match.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({estado:state,turno_id:next,status:won?'finalizada':'ativa',atualizado_em:new Date().toISOString()})}).then(function(){return recordAnswer(correct,q.cat,won,opponentId).catch(function(){});}).then(function(){window.showToast&&showToast(correct?(won?'Vitória! Você dominou as 6 áreas.':'Resposta correta! Área conquistada.'):'Resposta incorreta. A vez passou para o adversário.',correct?'success':'warning');return new Promise(function(resolve){setTimeout(resolve,correct?1200:1800);});}).then(loadMatches).then(function(){renderView(container);});
   }
 
   function repaintIfOpen() {
     var active = document.querySelector('.nav-item.active');
     var container = document.getElementById('viewContent');
     if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) return;
-    if (active && active.dataset.view === 'jogar' && container && !container.querySelector('.fg-game-frame') && !container.querySelector('.fg-chat') && !container.querySelector('.fg-play')) renderView(container);
+    if (active && active.dataset.view === 'jogar' && container && !container.querySelector('.fg-game-frame') && !container.querySelector('.fg-chat') && !container.querySelector('.fg-play') && !container.querySelector('.fg-page-card')) renderView(container);
   }
 
   function renderAdminDashboard(container) {
@@ -381,7 +507,7 @@
     if (running || !allowed()) return;
     if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) return;
     running = true;
-    heartbeat(false); loadPresence(); loadInvites(); loadMatches(); loadChatNotifications();
+    heartbeat(false); loadPresence(); loadInvites(); loadMatches(); loadChatNotifications(); loadGameProfile(); loadRanking();
     timers.push(setInterval(function () { heartbeat(false); }, 20000));
     timers.push(setInterval(loadPresence, 8000));
     timers.push(setInterval(loadInvites, 6000));
@@ -400,6 +526,8 @@
   var chatStyles='.fg-person-actions{display:flex;gap:6px}.fg-chat{height:calc(100vh - 145px);min-height:560px;display:flex;flex-direction:column;max-width:860px;margin:auto;background:#fff;border:1px solid rgba(30,50,45,.1);border-radius:18px;overflow:hidden}.fg-chat-head{display:flex;align-items:center;gap:10px;padding:13px;border-bottom:1px solid rgba(30,50,45,.1)}.fg-chat-head .fg-avatar{width:40px;height:40px}.fg-chat-head>div:nth-child(3){display:grid;flex:1}.fg-chat-head span{font-size:11px;color:var(--ac-charcoal-soft)}.fg-chat-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:9px;background:#f7f8f7}.fg-message{max-width:74%;padding:9px 12px;border-radius:14px;background:#fff;align-self:flex-start;display:grid}.fg-message.mine{align-self:flex-end;background:#dceee9}.fg-message.event{align-self:center;max-width:90%;background:#fff8e8;text-align:center}.fg-message small{font-size:9px;color:var(--ac-charcoal-soft);margin-top:4px}.fg-chat-form{display:flex;gap:8px;padding:12px;border-top:1px solid rgba(30,50,45,.1)}.fg-chat-form input{flex:1}';
 
   var adminDashboardStyles='.fg-admin-dash{background:#fff;border:1px solid rgba(30,50,45,.1);border-radius:18px;padding:clamp(16px,3vw,26px)}.fg-admin-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:18px}.fg-admin-head h3{margin:3px 0 4px}.fg-admin-head p{margin:0;color:var(--ac-charcoal-soft);font-size:12px}.fg-live{display:flex;align-items:center;gap:7px;background:#e8f6ef;color:#187347;border-radius:999px;padding:7px 11px;font-size:11px;font-weight:800;white-space:nowrap}.fg-live i{width:8px;height:8px;border-radius:50%;background:#27ae60;box-shadow:0 0 0 4px rgba(39,174,96,.13)}.fg-admin-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px}.fg-admin-metrics>div{border:1px solid rgba(30,50,45,.09);background:#f8faf9;border-radius:13px;padding:13px;display:grid;grid-template-columns:auto 1fr;column-gap:9px;align-items:center}.fg-admin-metrics i{font-size:20px;color:#267367;grid-row:1/3}.fg-admin-metrics b{font-size:22px;line-height:1}.fg-admin-metrics span{font-size:10px;color:var(--ac-charcoal-soft)}.fg-admin-list{display:grid;gap:9px}.fg-admin-match{display:flex;align-items:center;justify-content:space-between;gap:18px;border-top:1px solid rgba(30,50,45,.08);padding:14px 2px}.fg-admin-versus{display:flex;align-items:center;gap:13px;min-width:0}.fg-admin-versus>strong{color:var(--ac-charcoal-soft)}.fg-admin-player{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:7px;align-items:center;min-width:0}.fg-admin-player>i{width:9px;height:9px;border-radius:50%;grid-row:1/3}.fg-admin-player>i.on{background:#27ae60}.fg-admin-player>i.off{background:#a9b1ad}.fg-admin-player span{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}.fg-admin-player small,.fg-admin-info small{font-size:10px;color:var(--ac-charcoal-soft)}.fg-admin-info{display:grid;text-align:right;justify-items:end;min-width:210px}.fg-admin-info b{font-size:12px}.fg-admin-status{font-size:9px;font-weight:800;text-transform:uppercase;color:#176354;background:#dceee9;padding:4px 7px;border-radius:999px;margin-bottom:3px}.fg-admin-status.pausada,.fg-admin-status.aguardando{color:#76633d;background:#f2eee4}.fg-admin-empty{text-align:center;padding:34px 15px;display:grid;gap:5px;color:var(--ac-charcoal-soft)}.fg-admin-empty i{font-size:34px;opacity:.45}.fg-admin-empty b{color:var(--ac-charcoal)}@media(max-width:850px){.fg-admin-metrics{grid-template-columns:repeat(2,1fr)}}@media(max-width:650px){.fg-admin-head,.fg-admin-match{align-items:stretch;flex-direction:column}.fg-admin-info{text-align:left;justify-items:start;min-width:0}.fg-admin-versus{justify-content:space-between}.fg-admin-player span{max-width:110px}}';
+
+  var progressStyles='.fg-game-nav{display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border:1px solid rgba(30,50,45,.09);border-radius:16px;padding:6px;box-shadow:0 8px 24px rgba(30,50,45,.06)}.fg-game-nav button{border:0;background:transparent;border-radius:11px;padding:10px;display:flex;justify-content:center;align-items:center;gap:7px;color:var(--ac-charcoal-soft);font:700 12px Inter,sans-serif;cursor:pointer}.fg-game-nav button i{font-size:17px}.fg-game-nav button.active{background:#e4f2ee;color:#176354}.fg-profile-strip{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:14px;background:linear-gradient(120deg,#fff,#f2f8f6);border:1px solid rgba(30,50,45,.1);border-radius:17px;padding:13px 16px}.fg-level-orb{width:57px;height:57px;border-radius:18px;background:linear-gradient(145deg,#e7bf72,#c89438);color:#173f3a;display:grid;place-items:center;align-content:center;box-shadow:0 7px 18px rgba(196,148,56,.25)}.fg-level-orb span{font-size:8px;font-weight:900;letter-spacing:.12em}.fg-level-orb b{font-size:23px;line-height:1}.fg-profile-progress{display:grid;gap:7px;min-width:0}.fg-profile-progress>div:first-child{display:flex;justify-content:space-between;gap:12px}.fg-profile-progress span{font-size:10px;color:var(--ac-charcoal-soft)}.fg-xp-track{height:7px;background:#dfeae7;border-radius:99px;overflow:hidden}.fg-xp-track i{display:block;height:100%;background:linear-gradient(90deg,#2a8b77,#58b89f);border-radius:99px}.fg-currency,.fg-streak{display:grid;grid-template-columns:auto auto;align-items:center;column-gap:5px;text-align:center}.fg-currency i{color:#c89438}.fg-streak i{color:#e36b43}.fg-currency span,.fg-streak span{grid-column:1/3;font-size:9px;color:var(--ac-charcoal-soft)}.fg-missions,.fg-page-card{background:#fff;border:1px solid rgba(30,50,45,.1);border-radius:18px;padding:clamp(16px,3vw,26px)}.fg-section-title{display:flex;justify-content:space-between;align-items:end;margin-bottom:13px}.fg-section-title h3{margin:3px 0 0}.fg-section-title small{color:var(--ac-charcoal-soft)}.fg-mission-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}.fg-mission{border:1px solid rgba(30,50,45,.09);border-radius:13px;padding:12px;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;background:#fafbfa}.fg-mission>i{font-size:22px;color:#2a806f}.fg-mission>div{display:grid;gap:4px}.fg-mission span,.fg-mission small{font-size:10px;color:var(--ac-charcoal-soft)}.fg-mission>div>div{height:5px;background:#e5ece9;border-radius:99px;overflow:hidden}.fg-mission>div>div i{display:block;height:100%;background:#3a9b85}.fg-mission.done{background:#edf8f3;border-color:#b9dfd1}.fg-ranking-hero,.fg-ach-head{text-align:center;padding:14px 10px 24px}.fg-ranking-hero h2,.fg-ach-head h2{font-size:clamp(28px,5vw,42px);margin:5px 0}.fg-ranking-hero p,.fg-ach-head p{color:var(--ac-charcoal-soft);margin:0 auto;max-width:600px}.fg-ranking-list{max-width:760px;margin:auto}.fg-rank-row{display:grid;grid-template-columns:40px 44px 1fr auto;gap:11px;align-items:center;padding:11px;border-top:1px solid rgba(30,50,45,.08)}.fg-rank-row>strong{font-size:18px;text-align:center}.fg-rank-row:nth-child(1)>strong{color:#c89438}.fg-rank-row:nth-child(2)>strong{color:#778480}.fg-rank-row:nth-child(3)>strong{color:#a86c3e}.fg-rank-row.me{background:#eaf6f2;border-radius:12px}.fg-rank-avatar,.fg-big-avatar{display:grid;place-items:center;border-radius:50%;background:#dceee9;color:#176354;font-weight:900}.fg-rank-avatar{width:42px;height:42px}.fg-rank-row>div:nth-child(3){display:grid}.fg-rank-row span{font-size:10px;color:var(--ac-charcoal-soft)}.fg-rank-row em{font-style:normal;font-weight:800;color:#276e62}.fg-profile-hero{display:flex;align-items:center;gap:15px;padding-bottom:18px;border-bottom:1px solid rgba(30,50,45,.08)}.fg-big-avatar{width:76px;height:76px;font-size:23px}.fg-profile-hero h2{margin:4px 0}.fg-profile-hero p{margin:0;color:var(--ac-charcoal-soft)}.fg-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:18px 0}.fg-stat-grid>div{background:#f5f8f7;border-radius:12px;padding:14px;text-align:center;display:grid}.fg-stat-grid b{font-size:23px}.fg-stat-grid span{font-size:10px;color:var(--ac-charcoal-soft)}.fg-insights{display:grid;grid-template-columns:1fr 1fr;gap:10px}.fg-insights article{border-radius:14px;padding:15px;display:flex;gap:12px}.fg-insights article>i{font-size:28px}.fg-insights article>div{display:grid}.fg-insights span,.fg-insights small{font-size:10px}.fg-insights .best{background:#fff6df;color:#805d1c}.fg-insights .weak{background:#edf4fb;color:#315d82}.fg-subtitle{margin:22px 0 12px}.fg-mastery{display:grid;gap:10px}.fg-mastery>div{display:grid;grid-template-columns:180px 1fr 42px;align-items:center;gap:10px;font-size:12px}.fg-mastery span{display:flex;align-items:center;gap:7px}.fg-mastery span i{width:10px;height:10px;border-radius:50%}.fg-mastery>div>div{height:8px;background:#e7ecea;border-radius:99px;overflow:hidden}.fg-mastery>div>div i{display:block;height:100%;border-radius:99px}.fg-mastery>div>b{text-align:right}.fg-ach-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:11px}.fg-ach{border:1px solid rgba(30,50,45,.09);border-radius:15px;padding:17px 12px;text-align:center;display:grid;justify-items:center;gap:7px}.fg-ach>div{width:54px;height:54px;border-radius:18px;display:grid;place-items:center;background:#edf5f2;color:#287563;font-size:26px}.fg-ach span{font-size:11px;color:var(--ac-charcoal-soft);min-height:32px}.fg-ach small{font-size:8px;font-weight:900;letter-spacing:.1em;color:#2b816d}.fg-ach.locked{filter:grayscale(1);opacity:.55}.fg-ach.locked>div{background:#edf0ef}@media(max-width:760px){.fg-game-nav button span{display:none}.fg-profile-strip{grid-template-columns:auto 1fr}.fg-currency,.fg-streak{display:none}.fg-profile-progress>div:first-child{display:grid}.fg-mission-grid,.fg-ach-grid{grid-template-columns:1fr 1fr}.fg-insights{grid-template-columns:1fr}.fg-mastery>div{grid-template-columns:125px 1fr 36px}}@media(max-width:480px){.fg-mission-grid,.fg-ach-grid{grid-template-columns:1fr}.fg-stat-grid{grid-template-columns:1fr 1fr}}';
 
   var relockStyles = '.fg-hero-actions{display:flex;flex-direction:column;gap:8px;min-width:178px}.fg-lock-btn{background:rgba(255,255,255,.08)!important;color:#fff!important;border:1px solid rgba(255,255,255,.28)!important}.fg-lock-btn:hover{background:rgba(255,255,255,.16)!important}@media(max-width:760px){.fg-hero-actions{width:100%}.fg-hero-actions .btn{width:100%}}';
 
