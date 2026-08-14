@@ -11,7 +11,7 @@
     var session = JSON.parse(sessionStorage.getItem('avaliaclin_session_v1') || 'null');
     var access = JSON.parse(sessionStorage.getItem('avalix_fisiogame_beta_access_v2') || 'null');
     allowed = !!session && !!session.id && !!access && access.userId === session.id &&
-      access.hash === '5a490a3d0a12c9f17155a1c0880c9ad9ba9d57aadb89e53ddf553ab56f1638da';
+      access.hash === '67c273edbc8a2955a910298f8ce2ce07a87fb22236af47b533eaff5b2565b324';
   } catch (e) { allowed = false; }
   if (allowed) return;
   document.documentElement.className += ' fisiogame-locked';

@@ -2,7 +2,7 @@
   'use strict';
 
   /* Somente o hash da chave beta fica no código. */
-  var ACCESS_HASH = '5a490a3d0a12c9f17155a1c0880c9ad9ba9d57aadb89e53ddf553ab56f1638da';
+  var ACCESS_HASH = '67c273edbc8a2955a910298f8ce2ce07a87fb22236af47b533eaff5b2565b324';
   var ACCESS_SESSION_KEY = 'avalix_fisiogame_beta_access_v2';
   var LEGACY_ACCESS_KEY = 'avalix_fisiogame_beta_access_v1';
 
