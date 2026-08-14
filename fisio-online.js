@@ -120,6 +120,7 @@
   }
   function recordAnswer(correct,category,won,opponentId) {
     return loadGameProfile().then(function(p){
+      var previousLevel=levelOf(p.xp);
       var yesterday=new Date(Date.now()-86400000).toISOString().slice(0,10), today=todayKey();
       if(p.ultimo_dia!==today){p.sequencia_dias=p.ultimo_dia===yesterday?(p.sequencia_dias||0)+1:1;p.ultimo_dia=today;}
       p.perguntas++; p.missoes.respostas=(p.missoes.respostas||0)+1;
@@ -132,6 +133,7 @@
       if(p.missoes.partidas>=1&&!p.missoes.premio_partida){p.missoes.premio_partida=true;p.xp+=50;p.moedas+=20;}
       var unlocked=unlockAchievements(p);
       return saveProfile(p).then(function(saved){
+        if(levelOf(saved.xp)>previousLevel&&window.showToast)showToast('Novo nível alcançado: '+levelOf(saved.xp)+'!','success');
         if(unlocked.length&&window.showToast)showToast('Conquista desbloqueada: '+unlocked[0].name+'!','success');
         if(won&&opponentId)recordOpponentLoss(opponentId);
         return saved;
@@ -369,7 +371,7 @@
     var people = colleagues();
     var p=normalizeProfile(gameProfile||defaultProfile());
     container.innerHTML = '<style>' + styles + relockStyles + progressStyles + '</style><div class="fg-shell">' + gameNav('home') + profileStrip(p) +
-      '<section class="fg-hero"><div><span class="fg-kicker">FISIOGAME ONLINE</span><h2>Aprenda, desafie e conquiste as 6 áreas.</h2><p>Convide alguém da comunidade Avalix ou treine sozinho enquanto espera.</p></div><div class="fg-hero-actions"><button class="btn btn-primary" id="fgSolo"><i class="ti ti-player-play"></i> Treinar sozinho</button><button class="btn fg-lock-btn" id="fgRelock"><i class="ti ti-lock"></i> Bloquear acesso</button></div></section>' +
+      '<section class="fg-hero"><div class="fg-hero-shapes"><i></i><i></i><i></i></div><div class="fg-hero-copy"><span class="fg-kicker">FISIOGAME ONLINE</span><h2>Aprenda, desafie e conquiste as 6 áreas.</h2><p>Convide alguém da comunidade Avalix ou treine sozinho enquanto espera.</p></div><div class="fg-hero-stage"><div class="fg-mascot" aria-hidden="true"><span class="fg-mascot-face"><i></i><i></i><b></b></span><em class="ti ti-stethoscope"></em><small>Vamos nessa!</small></div><div class="fg-hero-actions"><button class="btn btn-primary fg-play-cta" id="fgSolo"><i class="ti ti-player-play"></i> Treinar sozinho</button><button class="btn fg-lock-btn" id="fgRelock"><i class="ti ti-lock"></i> Bloquear acesso</button></div></div></section>' +
       missionsHtml(p) +
       (matches.length ? '<section class="fg-invites"><h3><i class="ti ti-swords"></i> Suas partidas</h3>'+matches.map(function(m){var s=current(),other=m.jogador_1_id===s.id?m.jogador_2_nome:m.jogador_1_nome,isTurn=m.turno_id===s.id;return '<div class="fg-invite"><div><b>'+esc(other)+'</b><span>'+(isTurn?'É sua vez de responder':'Aguardando a jogada do adversário')+'</span></div><button class="btn '+(isTurn?'btn-primary':'btn-ghost')+' btn-sm" data-match="'+esc(m.id)+'">Abrir partida</button></div>';}).join('')+'</section>' : '') +
       (received.length ? '<section class="fg-invites"><h3><i class="ti ti-mail-opened"></i> Convites recebidos</h3>' + received.map(function (i) { return '<div class="fg-invite"><div><b>' + esc(i.remetente_nome) + '</b><span>quer jogar uma partida com você</span></div><div><button class="btn btn-primary btn-sm" data-accept="' + esc(i.id) + '">Aceitar</button><button class="btn btn-ghost btn-sm" data-decline="' + esc(i.id) + '">Recusar</button></div></div>'; }).join('') + '</section>' : '') +
@@ -420,8 +422,21 @@
     container.querySelectorAll('[data-answer]').forEach(function(btn){btn.onclick=function(){answerMatch(match,state,q,Number(btn.dataset.answer),container);};});
   }
 
+  function gameCelebration(container, correct, won) {
+    var layer=document.createElement('div');
+    layer.className='fg-celebration '+(correct?'success':'try-again')+(won?' victory':'');
+    var colors=['#e7bf72','#3ba489','#e66c5b','#4b88c7','#9867c6','#ef4f83'];
+    var pieces=correct?(won?42:24):8;
+    var confetti='';
+    for(var i=0;i<pieces;i++)confetti+='<i style="--x:'+((i*47)%100)+'%;--delay:'+((i%9)*.045)+'s;--spin:'+(120+(i%6)*60)+'deg;--color:'+colors[i%colors.length]+'"></i>';
+    layer.innerHTML=confetti+'<div class="fg-reaction"><span class="fg-reaction-face"><i></i><i></i><b></b></span><strong>'+(won?'DOMÍNIO COMPLETO!':correct?'ÁREA CONQUISTADA!':'CONTINUE TENTANDO!')+'</strong><small>'+(won?'Você venceu o duelo clínico':correct?'+25 XP e progresso na temporada':'Cada erro também ensina')+'</small></div>';
+    container.appendChild(layer);
+    setTimeout(function(){layer.classList.add('show');},20);
+    setTimeout(function(){layer.remove();},won?2600:1900);
+  }
+
   function answerMatch(match,state,q,answer,container){
-    container.querySelectorAll('[data-answer]').forEach(function(b){b.disabled=true;});
+    container.querySelectorAll('[data-answer]').forEach(function(b){b.disabled=true;b.classList.toggle('is-correct',Number(b.dataset.answer)===q.c);b.classList.toggle('is-wrong',Number(b.dataset.answer)===answer&&answer!==q.c);});
     var correct=answer===q.c, p1=match.jogador_1_id===current().id, seals=p1?(state.selos_1||[]):(state.selos_2||[]);
     if(correct&&seals.indexOf(q.cat)<0) seals.push(q.cat);
     if(p1){state.selos_1=seals;if(correct)state.acertos_1=(state.acertos_1||0)+1;}else{state.selos_2=seals;if(correct)state.acertos_2=(state.acertos_2||0)+1;}
@@ -430,6 +445,7 @@
     var opponentId=match.jogador_1_id===current().id?match.jogador_2_id:match.jogador_1_id;
     var note=container.querySelector('#fgAnswerNote');
     if(note)note.innerHTML='<div class="fg-answer-feedback '+(correct?'correct':'wrong')+'"><i class="ti '+(correct?'ti-circle-check':'ti-circle-x')+'"></i><div><b>'+(correct?'Resposta correta!':'Quase lá!')+'</b><span>'+esc(q.e||('A resposta correta é '+q.a[q.c]+'.'))+'</span></div></div>';
+    gameCelebration(container,correct,won);
     api('/rest/v1/avalix_partidas?id=eq.'+encodeURIComponent(match.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({estado:state,turno_id:next,status:won?'finalizada':'ativa',atualizado_em:new Date().toISOString()})}).then(function(){return recordAnswer(correct,q.cat,won,opponentId).catch(function(){});}).then(function(){window.showToast&&showToast(correct?(won?'Vitória! Você dominou as 6 áreas.':'Resposta correta! Área conquistada.'):'Resposta incorreta. A vez passou para o adversário.',correct?'success':'warning');return new Promise(function(resolve){setTimeout(resolve,correct?1200:1800);});}).then(loadMatches).then(function(){renderView(container);});
   }
 
