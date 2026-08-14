@@ -238,6 +238,10 @@
   function roleLabel(role) { return role === 'aluno' ? 'Aluno' : role === 'professor' ? 'Professor' : 'Administrador'; }
 
   function renderView(container) {
+    if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) {
+      window.FisioGameBeta.render(container);
+      return;
+    }
     if (!allowed()) {
       container.innerHTML = '<div class="card card-pad"><h2>Acesso restrito</h2><p>O FisioGame está disponível para alunos, professores e administradores.</p></div>';
       return;
@@ -368,6 +372,7 @@
 
   function start() {
     if (running || !allowed()) return;
+    if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) return;
     running = true;
     heartbeat(false); loadPresence(); loadInvites(); loadMatches(); loadChatNotifications();
     timers.push(setInterval(function () { heartbeat(false); }, 20000));

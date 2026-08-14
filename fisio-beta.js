@@ -3,7 +3,8 @@
 
   /* Somente o hash da chave beta fica no código. */
   var ACCESS_HASH = '5a490a3d0a12c9f17155a1c0880c9ad9ba9d57aadb89e53ddf553ab56f1638da';
-  var ACCESS_SESSION_KEY = 'avalix_fisiogame_beta_access_v1';
+  var ACCESS_SESSION_KEY = 'avalix_fisiogame_beta_access_v2';
+  var LEGACY_ACCESS_KEY = 'avalix_fisiogame_beta_access_v1';
 
   function esc(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
@@ -23,7 +24,25 @@
   }
 
   function hasAccess() {
-    return sessionStorage.getItem(ACCESS_SESSION_KEY) === ACCESS_HASH;
+    var session = typeof session_get === 'function' ? session_get() : null;
+    if (!session || !session.id) return false;
+    try {
+      var access = JSON.parse(sessionStorage.getItem(ACCESS_SESSION_KEY) || 'null');
+      return !!access && access.hash === ACCESS_HASH && access.userId === session.id;
+    } catch (e) { return false; }
+  }
+
+  function grantAccess() {
+    var session = typeof session_get === 'function' ? session_get() : null;
+    if (!session || !session.id) return false;
+    sessionStorage.removeItem(LEGACY_ACCESS_KEY);
+    sessionStorage.setItem(ACCESS_SESSION_KEY, JSON.stringify({ hash:ACCESS_HASH, userId:session.id }));
+    return true;
+  }
+
+  function lockAccess() {
+    sessionStorage.removeItem(ACCESS_SESSION_KEY);
+    sessionStorage.removeItem(LEGACY_ACCESS_KEY);
   }
 
   function renderGate(container, message) {
@@ -44,8 +63,7 @@
       button.disabled = true;
       hash(input.value).then(function (result) {
         if (result === ACCESS_HASH) {
-          sessionStorage.setItem(ACCESS_SESSION_KEY, ACCESS_HASH);
-          renderGame(container);
+          if (grantAccess()) renderGame(container);
         } else {
           button.disabled = false;
           input.value = '';
@@ -67,7 +85,7 @@
       '<div class="fg-framebar"><div><span class="fg-live-dot"></span><b>Beta fechado</b><span>Acesso liberado nesta sessão</span></div><button class="btn btn-ghost btn-sm" id="fgLock"><i class="ti ti-lock"></i> Bloquear acesso</button></div>' +
       '<iframe title="FisioGame — beta fechado" src="fisiogame.html"></iframe></div>';
     container.querySelector('#fgLock').addEventListener('click', function () {
-      sessionStorage.removeItem(ACCESS_SESSION_KEY);
+      lockAccess();
       renderGate(container);
     });
   }
@@ -87,7 +105,8 @@
   window.AvaliaClinViews = window.AvaliaClinViews || {};
   window.AvaliaClinViews.jogar = render;
   window.FisioGameBeta = {
-    lock: function () { sessionStorage.removeItem(ACCESS_SESSION_KEY); },
-    hasAccess: hasAccess
+    lock: lockAccess,
+    hasAccess: hasAccess,
+    render: render
   };
 })();

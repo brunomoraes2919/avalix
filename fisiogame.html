@@ -4,6 +4,25 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FisioGame — Trivia de Fisioterapia</title>
+<script>
+(function () {
+  var allowed = false;
+  try {
+    var session = JSON.parse(sessionStorage.getItem('avaliaclin_session_v1') || 'null');
+    var access = JSON.parse(sessionStorage.getItem('avalix_fisiogame_beta_access_v2') || 'null');
+    allowed = !!session && !!session.id && !!access && access.userId === session.id &&
+      access.hash === '5a490a3d0a12c9f17155a1c0880c9ad9ba9d57aadb89e53ddf553ab56f1638da';
+  } catch (e) { allowed = false; }
+  if (allowed) return;
+  document.documentElement.className += ' fisiogame-locked';
+  document.addEventListener('DOMContentLoaded', function () {
+    document.body.innerHTML = '<main class="fg-direct-lock"><div><span>FISIOGAME</span><h1>Acesso antecipado</h1><p>Entre no Avalix e informe a chave de acesso na aba do jogo.</p><button type="button" onclick="history.back()">Voltar</button></div></main>';
+  });
+})();
+</script>
+<style>
+  html.fisiogame-locked body{margin:0;background:#102d2a!important}.fg-direct-lock{min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Arial,sans-serif;color:#fff;text-align:center;background:radial-gradient(circle at 20% 15%,rgba(70,150,130,.22),transparent 35%),linear-gradient(145deg,#102d2a,#1d5149 62%,#173b37)}.fg-direct-lock>div{max-width:520px}.fg-direct-lock span{font-size:11px;font-weight:800;letter-spacing:.22em;color:#e8c679}.fg-direct-lock h1{margin:12px 0;color:#fff;font-size:clamp(32px,6vw,52px)}.fg-direct-lock p{color:rgba(255,255,255,.72);line-height:1.6}.fg-direct-lock button{margin-top:14px;border:0;border-radius:10px;padding:11px 20px;background:#e3b963;color:#153d38;font-weight:800;cursor:pointer}
+</style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,700;1,9..144,500&family=Manrope:wght@400;500;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
