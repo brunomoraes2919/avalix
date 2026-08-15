@@ -309,6 +309,7 @@
   #screen-game.active{background:radial-gradient(circle at 50% 16%,rgba(96,201,176,.17),transparent 38%),linear-gradient(160deg,#f7fbf9,#eef5f2);border:1px solid rgba(31,94,85,.08);border-radius:28px;padding:clamp(14px,3vw,30px);box-shadow:0 22px 60px rgba(24,75,67,.12);overflow:hidden}
   .turn-bar{display:inline-flex;margin:0 auto 14px;padding:7px 15px;border-radius:999px;background:#fff;color:#176354;box-shadow:0 6px 18px rgba(24,75,67,.1);font-size:.92rem;text-transform:uppercase;letter-spacing:.08em}
   .hud{margin-bottom:14px}.player-card{border:0;border-radius:18px;box-shadow:0 9px 22px rgba(24,75,67,.09)}
+  .hud{width:min(720px,100%);margin-inline:auto;justify-content:space-between}.player-card{position:relative;min-width:190px;padding:10px 15px 10px 10px!important;border:3px solid #fff!important;background:linear-gradient(145deg,#fff,#edf7f3)!important;box-shadow:0 6px 0 #d4e4de,0 12px 24px rgba(24,75,67,.1)!important}.player-card.active{border-color:#f0c65d!important;box-shadow:0 6px 0 #c68f2d,0 0 26px rgba(230,177,55,.3)!important;transform:translateY(-3px)}.player-card.active:after{content:'SUA VEZ';position:absolute;top:-11px;left:50%;transform:translateX(-50%);padding:3px 8px;border-radius:999px;background:#e5a93a;color:#56370d;font-size:7px;font-weight:1000;letter-spacing:.1em;white-space:nowrap}.avatar{width:54px!important;height:54px!important;border:4px solid #fff;box-shadow:0 0 0 3px #2d806e;overflow:hidden}.avatar img{width:100%;height:100%;border-radius:50%;object-fit:cover}.mini-dial{width:42px!important;height:42px!important}.player-meta .pname{font-size:14px!important}
   .stage{gap:15px}.dial-wrap{width:clamp(270px,48vw,390px);filter:drop-shadow(0 22px 22px rgba(17,67,59,.2))}
   .wheel-rot{position:absolute;inset:4%;border-radius:50%;transition:transform 4.2s cubic-bezier(.08,.72,.12,1);will-change:transform}
   .wheel-rot::before{content:'';position:absolute;inset:-13px;border-radius:50%;background:linear-gradient(145deg,#ffe49a,#c88c2f 55%,#fff0b6);box-shadow:inset 0 0 0 4px #9d651c,inset 0 0 0 9px #f7cc67,0 10px 0 #8c5b21;z-index:-1}
@@ -323,7 +324,7 @@
   .spin-btn{padding:14px 34px;background:linear-gradient(180deg,#24796b,#15584f);border:2px solid rgba(255,255,255,.7);box-shadow:0 7px 0 #103f3a,0 13px 25px rgba(16,63,58,.24);text-transform:uppercase;letter-spacing:.06em}.spin-btn:not(:disabled):active{transform:translateY(5px);box-shadow:0 2px 0 #103f3a}
   .question-card{border:0;border-top:6px solid var(--qcolor,#338f75);border-radius:23px;box-shadow:0 16px 40px rgba(24,75,67,.14);animation:questionRise .55s cubic-bezier(.2,.9,.25,1.12)}
   @keyframes pointerTick{to{transform:translateX(-50%) rotate(6deg)}}@keyframes wheelLift{50%{transform:scale(1.035)}}@keyframes wheelLand{0%{transform:scale(1.04)}60%{transform:scale(.97)}100%{transform:scale(1)}}@keyframes questionRise{from{opacity:0;transform:translateY(28px) scale(.97)}to{opacity:1;transform:none}}
-  @media(max-width:560px){#app{padding:16px 10px 36px}.brand{margin-bottom:16px}.brand p{display:none}#screen-game.active{border-radius:22px;padding:12px 9px 20px}.hud{flex-wrap:nowrap;overflow:auto;justify-content:flex-start;padding:3px}.player-card{min-width:145px}.dial-wrap{width:min(82vw,330px)}.question-card{padding:17px}.q-text{font-size:1.08rem}}
+  @media(max-width:560px){#app{padding:16px 10px 36px}.brand{margin-bottom:16px}.brand p{display:none}#screen-game.active{border-radius:22px;padding:12px 9px 20px}.hud{flex-wrap:nowrap;overflow:auto;justify-content:flex-start;padding:13px 3px 5px;gap:10px}.player-card{min-width:168px}.avatar{width:46px!important;height:46px!important}.dial-wrap{width:min(82vw,330px)}.question-card{padding:17px}.q-text{font-size:1.08rem}}
 
   /* v37 — linguagem visual unificada em todas as telas */
   body{background:radial-gradient(circle at 8% 8%,rgba(72,183,157,.2),transparent 25%),radial-gradient(circle at 92% 12%,rgba(240,198,91,.2),transparent 24%),linear-gradient(155deg,#eef7f3,#e4efeb);min-height:100vh}
@@ -396,8 +397,8 @@
           <div class="dial"></div>
           <div class="ticks" id="ticks"></div>
           <div class="cat-icon-wrap" id="cat-icons"></div>
-          <div class="dial-face" id="dial-face"><span id="dial-hint">GIRAR</span></div>
         </div>
+        <div class="dial-face" id="dial-face"><span id="dial-hint">GIRAR</span></div>
         <div class="needle-rot" id="needle-rot"><div class="needle-hand"></div></div>
         <div class="pivot"></div>
       </div>
@@ -685,7 +686,7 @@ const AUDIO = (()=>{
   const st={ctx:null,music:localStorage.getItem('fg_music')!=='off',sfx:localStorage.getItem('fg_sfx')!=='off',volume:.42,timer:null,step:0};
   const ctx=()=>{if(!st.ctx){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;st.ctx=new AC()}if(st.ctx.state==='suspended')st.ctx.resume();return st.ctx};
   const tone=(f,d,t='sine',g=.06,delay=0)=>{const c=ctx();if(!c)return;const o=c.createOscillator(),v=c.createGain(),n=c.currentTime+delay;o.type=t;o.frequency.value=f;v.gain.setValueAtTime(.0001,n);v.gain.exponentialRampToValueAtTime(g*st.volume,n+.015);v.gain.exponentialRampToValueAtTime(.0001,n+d);o.connect(v);v.connect(c.destination);o.start(n);o.stop(n+d+.02)};
-  const maps={click:[[520,.07,'sine',.035,0]],spin:[[210,.1,'triangle',.06,0],[290,.12,'triangle',.06,.1],[390,.16,'triangle',.06,.21]],land:[[660,.12,'sine',.08,0],[880,.22,'sine',.07,.1]],correct:[[523,.13,'triangle',.08,0],[659,.13,'triangle',.08,.09],[784,.28,'triangle',.09,.18]],wrong:[[220,.2,'sawtooth',.045,0],[165,.3,'sawtooth',.04,.14]],victory:[[392,.13,'triangle',.07,0],[523,.13,'triangle',.08,.1],[659,.15,'triangle',.08,.2],[784,.45,'sine',.1,.32]]};
+  const maps={click:[[520,.07,'sine',.035,0]],tick:[[720,.035,'square',.018,0]],spin:[[110,.75,'sawtooth',.022,0],[165,.7,'triangle',.035,.05],[220,.6,'triangle',.03,.12]],land:[[660,.12,'sine',.08,0],[880,.22,'sine',.07,.1]],question:[[392,.11,'triangle',.05,0],[523,.13,'triangle',.06,.08],[659,.24,'sine',.06,.17]],correct:[[523,.13,'triangle',.08,0],[659,.13,'triangle',.08,.09],[784,.28,'triangle',.09,.18]],wrong:[[220,.2,'sawtooth',.045,0],[165,.3,'sawtooth',.04,.14]],victory:[[392,.13,'triangle',.07,0],[523,.13,'triangle',.08,.1],[659,.15,'triangle',.08,.2],[784,.45,'sine',.1,.32]]};
   const sound=n=>{if(st.sfx)(maps[n]||maps.click).forEach(x=>tone(...x))};
   const beat=()=>{if(!st.music)return;const melody=[523,587,659,784,659,587,523,440,494,587,659,740,659,587,494,440];tone(melody[st.step++%melody.length],.24,'triangle',.018);tone([261,293,246,220][Math.floor(st.step/4)%4],.72,'sine',.012)};
   return {state:st,sound,start(){ctx();if(!st.timer){beat();st.timer=setInterval(beat,900)}},stop(){clearInterval(st.timer);st.timer=null}};
@@ -813,6 +814,7 @@ function startSpin(){
   if(state.spinning) return;
   state.spinning = true;
   AUDIO.sound('spin');
+  let spinTicks=0; const spinTickTimer=setInterval(()=>{AUDIO.sound('tick');if(++spinTicks>25)clearInterval(spinTickTimer)},115);
   $("#spin-btn").disabled = true;
   $("#dial-hint").textContent = "Girando...";
   $("#dial-wrap").classList.remove("landed");
@@ -859,6 +861,7 @@ function drawQuestion(catId){
 }
 
 function revealCategory(catIndex){
+  AUDIO.sound('question');
   state.activeCatIndex = catIndex;
   const cat = CATEGORIES[catIndex];
   $("#dial-hint").innerHTML = cat.name.split(" & ").join("<br>&");
@@ -993,8 +996,10 @@ function buildHud(){
     CATEGORIES.forEach((cat,ci)=>{
       dots += '<div class="mini-dot" id="dot-'+i+'-'+ci+'" style="--dotcolor:'+cat.color+'; transform:rotate('+(ci*60)+'deg)"><i></i></div>';
     });
+    let photo="";
+    try{if(parent!==window&&parent.db_load){const db=parent.db_load(),sess=parent.session_get&&parent.session_get(),all=[...(db.users||[]),...(db.alunos||[])];const person=(i===0&&sess?all.find(x=>String(x.id)===String(sess.id)||String(x.id)===String(sess.alunoId)):null)||all.find(x=>String(x.nome||"").toLowerCase()===String(p.name||"").toLowerCase());photo=person&&person.fotoDataUrl||""}}catch(e){}
     card.innerHTML =
-      '<div class="avatar">'+initials+'</div>'+
+      '<div class="avatar">'+(photo?'<img src="'+photo+'" alt="">':initials)+'</div>'+
       '<div class="mini-dial">'+dots+'</div>'+
       '<div class="player-meta"><span class="pname">'+p.name+'</span><span class="pscore" id="pscore-'+i+'">0/6</span></div>';
     hud.appendChild(card);
