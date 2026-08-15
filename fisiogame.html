@@ -300,9 +300,30 @@
   footer{ text-align:center; margin-top:40px; font-size:11.5px; color:var(--ink-soft); }
 
   @media (prefers-reduced-motion: reduce){
-    .needle-rot{ transition-duration:.4s; }
+    .wheel-rot{ transition-duration:.4s!important; }
     .screen{ animation:none; }
   }
+
+  /* v36 — roleta profissional inspirada no modelo visual gerado */
+  #screen-game{max-width:980px;margin-inline:auto}
+  #screen-game.active{background:radial-gradient(circle at 50% 16%,rgba(96,201,176,.17),transparent 38%),linear-gradient(160deg,#f7fbf9,#eef5f2);border:1px solid rgba(31,94,85,.08);border-radius:28px;padding:clamp(14px,3vw,30px);box-shadow:0 22px 60px rgba(24,75,67,.12);overflow:hidden}
+  .turn-bar{display:inline-flex;margin:0 auto 14px;padding:7px 15px;border-radius:999px;background:#fff;color:#176354;box-shadow:0 6px 18px rgba(24,75,67,.1);font-size:.92rem;text-transform:uppercase;letter-spacing:.08em}
+  .hud{margin-bottom:14px}.player-card{border:0;border-radius:18px;box-shadow:0 9px 22px rgba(24,75,67,.09)}
+  .stage{gap:15px}.dial-wrap{width:clamp(270px,48vw,390px);filter:drop-shadow(0 22px 22px rgba(17,67,59,.2))}
+  .wheel-rot{position:absolute;inset:4%;border-radius:50%;transition:transform 4.2s cubic-bezier(.08,.72,.12,1);will-change:transform}
+  .wheel-rot::before{content:'';position:absolute;inset:-13px;border-radius:50%;background:linear-gradient(145deg,#ffe49a,#c88c2f 55%,#fff0b6);box-shadow:inset 0 0 0 4px #9d651c,inset 0 0 0 9px #f7cc67,0 10px 0 #8c5b21;z-index:-1}
+  .wheel-rot::after{content:'';position:absolute;inset:2px;border-radius:50%;box-shadow:inset 0 0 0 3px rgba(255,255,255,.65),inset 0 0 24px rgba(5,42,37,.2);pointer-events:none}
+  .dial{box-shadow:none;inset:0;background:conic-gradient(from -30deg,#43a568 0 60deg,#3689cc 60deg 120deg,#ef8744 120deg 180deg,#8a58bd 180deg 240deg,#25a8a2 240deg 300deg,#e7bc39 300deg 360deg)}
+  .cat-icon-wrap{inset:0}.cat-icon{top:9%;width:38px;height:38px;margin-left:-19px;background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.72);border-radius:13px;padding:7px;filter:drop-shadow(0 3px 4px rgba(0,0,0,.2))}
+  .ticks{display:none}.dial-face{inset:31%;z-index:5;background:linear-gradient(145deg,#fff8d9,#f2c65f);border:5px solid #fff1b5;box-shadow:0 0 0 5px #a86f20,0 8px 15px rgba(63,37,5,.3);cursor:pointer;transition:.2s}
+  .dial-face:hover{transform:scale(1.04)}.dial-face span{font-family:var(--font-display);font-size:clamp(13px,2vw,18px);color:#694213;text-transform:uppercase;line-height:1.05;text-shadow:0 1px #fff;white-space:pre-line}
+  .wheel-pointer{position:absolute;z-index:12;left:50%;top:-5px;transform:translateX(-50%);width:54px;height:64px;filter:drop-shadow(0 5px 4px rgba(74,40,8,.3))}
+  .wheel-pointer::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,#fff0a6,#d79b33);clip-path:polygon(50% 100%,4% 15%,24% 0,76% 0,96% 15%);border-radius:8px}
+  .needle-rot,.pivot{display:none}.dial-wrap.spinning .wheel-pointer{animation:pointerTick .17s ease-in-out infinite alternate}.dial-wrap.spinning{animation:wheelLift .55s ease both}.dial-wrap.landed{animation:wheelLand .6s cubic-bezier(.2,.9,.3,1.25)}
+  .spin-btn{padding:14px 34px;background:linear-gradient(180deg,#24796b,#15584f);border:2px solid rgba(255,255,255,.7);box-shadow:0 7px 0 #103f3a,0 13px 25px rgba(16,63,58,.24);text-transform:uppercase;letter-spacing:.06em}.spin-btn:not(:disabled):active{transform:translateY(5px);box-shadow:0 2px 0 #103f3a}
+  .question-card{border:0;border-top:6px solid var(--qcolor,#338f75);border-radius:23px;box-shadow:0 16px 40px rgba(24,75,67,.14);animation:questionRise .55s cubic-bezier(.2,.9,.25,1.12)}
+  @keyframes pointerTick{to{transform:translateX(-50%) rotate(6deg)}}@keyframes wheelLift{50%{transform:scale(1.035)}}@keyframes wheelLand{0%{transform:scale(1.04)}60%{transform:scale(.97)}100%{transform:scale(1)}}@keyframes questionRise{from{opacity:0;transform:translateY(28px) scale(.97)}to{opacity:1;transform:none}}
+  @media(max-width:560px){#app{padding:16px 10px 36px}.brand{margin-bottom:16px}.brand p{display:none}#screen-game.active{border-radius:22px;padding:12px 9px 20px}.hud{flex-wrap:nowrap;overflow:auto;justify-content:flex-start;padding:3px}.player-card{min-width:145px}.dial-wrap{width:min(82vw,330px)}.question-card{padding:17px}.q-text{font-size:1.08rem}}
 </style>
 </head>
 <body>
@@ -362,10 +383,13 @@
 
     <div class="stage">
       <div class="dial-wrap" id="dial-wrap">
-        <div class="dial"></div>
-        <div class="ticks" id="ticks"></div>
-        <div class="cat-icon-wrap" id="cat-icons"></div>
-        <div class="dial-face"><span id="dial-hint">Toque em girar<br>para sortear a área</span></div>
+        <div class="wheel-pointer"></div>
+        <div class="wheel-rot" id="wheel-rot">
+          <div class="dial"></div>
+          <div class="ticks" id="ticks"></div>
+          <div class="cat-icon-wrap" id="cat-icons"></div>
+          <div class="dial-face" id="dial-face"><span id="dial-hint">GIRAR</span></div>
+        </div>
         <div class="needle-rot" id="needle-rot"><div class="needle-hand"></div></div>
         <div class="pivot"></div>
       </div>
@@ -747,32 +771,39 @@ function buildDial(){
     wrap.appendChild(icon);
     iconsWrap.appendChild(wrap);
   });
-  $("#needle-rot").style.setProperty("--rot","0deg");
+  $("#wheel-rot").style.transform = "rotate(0deg)";
+  $("#dial-wrap").classList.remove("spinning","landed");
 }
 
 function spinTo(catIndex){
-  const targetMod = catIndex*60;
+  const targetMod = -catIndex*60;
   const base = state.needleRotation - (state.needleRotation % 360);
-  let next = base + 360*5 + targetMod;
+  let next = base + 360*6 + targetMod;
   if(next <= state.needleRotation) next += 360;
   state.needleRotation = next;
-  $("#needle-rot").style.setProperty("--rot", next+"deg");
+  $("#wheel-rot").style.transform = "rotate("+next+"deg)";
 }
 
-$("#spin-btn").addEventListener("click", ()=>{
+function startSpin(){
   if(state.spinning) return;
   state.spinning = true;
   $("#spin-btn").disabled = true;
   $("#dial-hint").textContent = "Girando...";
+  $("#dial-wrap").classList.remove("landed");
+  $("#dial-wrap").classList.add("spinning");
   hideQuestionCard();
   const player = state.players[state.current];
   const catIndex = pickCategoryIndex(player);
   spinTo(catIndex);
   setTimeout(()=>{
     state.spinning = false;
+    $("#dial-wrap").classList.remove("spinning");
+    $("#dial-wrap").classList.add("landed");
     revealCategory(catIndex);
-  }, 3200);
-});
+  }, 4300);
+}
+$("#spin-btn").addEventListener("click", startSpin);
+$("#dial-face").addEventListener("click", startSpin);
 
 function pickCategoryIndex(player){
   const weights = CATEGORIES.map(cat => player.tokens.includes(cat.id) ? 1 : 3);
@@ -811,6 +842,7 @@ function revealCategory(catIndex){
 
 function showQuestion(cat, q){
   state.answered = false;
+  $("#question-card").style.setProperty("--qcolor",cat.color);
   const tag = $("#q-cat-tag");
   tag.style.background = cat.color;
   $("#q-cat-name").textContent = cat.name;
