@@ -373,6 +373,41 @@
     container.innerHTML='<style>'+styles+progressStyles+'</style><div class="fg-shell">'+gameNav('conquistas')+profileStrip(p)+'<section class="fg-page-card"><div class="fg-ach-head"><span class="eyebrow">SUA JORNADA</span><h2>Conquistas</h2><p>'+p.conquistas.length+' de '+ACHIEVEMENTS.length+' desbloqueadas</p></div><div class="fg-ach-grid">'+ACHIEVEMENTS.map(function(a){var got=p.conquistas.indexOf(a.id)>=0;return '<article class="fg-ach '+(got?'unlocked':'locked')+'"><div><i class="ti '+(got?a.icon:'ti-lock')+'"></i></div><b>'+a.name+'</b><span>'+a.desc+'</span><small>'+(got?'CONQUISTADA':'BLOQUEADA')+'</small></article>';}).join('')+'</div></section></div>';bindGameNav(container);
   }
 
+  function startMascotRotation(container) {
+    var mascot=container.querySelector('.fg-capy-mascot');
+    if(!mascot)return;
+    var frames=mascot.querySelectorAll('.fg-capy-frame');
+    var bubble=mascot.querySelector('small');
+    var poses=[
+      {src:'capivara-fisioterapeuta.png?v=45',phrase:'Vamos nessa!'},
+      {src:'capivara-fisioterapeuta-positivo.png?v=45',phrase:'Você consegue!'},
+      {src:'capivara-fisioterapeuta-estudando.png?v=45',phrase:'Hora de aprender!'},
+      {src:'capivara-fisioterapeuta-goniometro.png?v=45',phrase:'Movimente-se!'}
+    ];
+    poses.forEach(function(p){var preload=new Image();preload.src=p.src;});
+    Array.prototype.forEach.call(frames,function(frame){
+      frame.addEventListener('error',function(){this.classList.add('has-error');});
+    });
+    if(frames.length<2||window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    var index=0,active=0;
+    var timer=window.setInterval(function(){
+      if(!mascot.isConnected){window.clearInterval(timer);return;}
+      if(document.hidden)return;
+      index=(index+1)%poses.length;
+      var next=active===0?1:0;
+      var nextFrame=frames[next];
+      nextFrame.classList.remove('has-error');
+      nextFrame.onload=function(){
+        if(!mascot.isConnected)return;
+        frames[active].classList.remove('is-active');
+        nextFrame.classList.add('is-active');
+        active=next;
+        if(bubble)bubble.textContent=poses[index].phrase;
+      };
+      nextFrame.src=poses[index].src;
+    },5500);
+  }
+
   function renderView(container) {
     setMusicMode('ambient');
     if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) {
@@ -387,7 +422,7 @@
     var people = colleagues();
     var p=normalizeProfile(gameProfile||defaultProfile());
     container.innerHTML = '<style>' + styles + relockStyles + progressStyles + '</style><div class="fg-shell">' + gameNav('home') + profileStrip(p) +
-      '<section class="fg-hero"><div class="fg-hero-shapes"><i></i><i></i><i></i></div><div class="fg-hero-copy"><span class="fg-kicker">FISIOGAME ONLINE</span><h2>Aprenda, desafie e conquiste as 6 áreas.</h2><p>Convide alguém da comunidade Avalix ou treine sozinho enquanto espera.</p></div><div class="fg-hero-stage"><div class="fg-mascot fg-capy-mascot" aria-hidden="true"><img src="capivara-fisioterapeuta.png?v=43" alt=""><small>Vamos nessa!</small></div><div class="fg-hero-actions"><button class="btn btn-primary fg-play-cta" id="fgSolo"><i class="ti ti-player-play"></i> Treinar sozinho</button><button class="btn fg-lock-btn" id="fgRelock"><i class="ti ti-lock"></i> Bloquear acesso</button></div></div></section>' +
+      '<section class="fg-hero"><div class="fg-hero-shapes"><i></i><i></i><i></i></div><div class="fg-hero-copy"><span class="fg-kicker">FISIOGAME ONLINE</span><h2>Aprenda, desafie e conquiste as 6 áreas.</h2><p>Convide alguém da comunidade Avalix ou treine sozinho enquanto espera.</p></div><div class="fg-hero-stage"><div class="fg-mascot fg-capy-mascot" aria-hidden="true"><img class="fg-capy-frame is-active" src="capivara-fisioterapeuta.png?v=45" alt=""><img class="fg-capy-frame" src="capivara-fisioterapeuta.png?v=45" alt=""><small>Vamos nessa!</small></div><div class="fg-hero-actions"><button class="btn btn-primary fg-play-cta" id="fgSolo"><i class="ti ti-player-play"></i> Treinar sozinho</button><button class="btn fg-lock-btn" id="fgRelock"><i class="ti ti-lock"></i> Bloquear acesso</button></div></div></section>' +
       missionsHtml(p) +
       (matches.length ? '<section class="fg-invites"><h3><i class="ti ti-swords"></i> Suas partidas</h3>'+matches.map(function(m){var s=current(),other=m.jogador_1_id===s.id?m.jogador_2_nome:m.jogador_1_nome,isTurn=m.turno_id===s.id;return '<div class="fg-invite"><div><b>'+esc(other)+'</b><span>'+(isTurn?'É sua vez de responder':'Aguardando a jogada do adversário')+'</span></div><button class="btn '+(isTurn?'btn-primary':'btn-ghost')+' btn-sm" data-match="'+esc(m.id)+'">Abrir partida</button></div>';}).join('')+'</section>' : '') +
       (received.length ? '<section class="fg-invites"><h3><i class="ti ti-mail-opened"></i> Convites recebidos</h3>' + received.map(function (i) { return '<div class="fg-invite"><div><b>' + esc(i.remetente_nome) + '</b><span>quer jogar uma partida com você</span></div><div><button class="btn btn-primary btn-sm" data-accept="' + esc(i.id) + '">Aceitar</button><button class="btn btn-ghost btn-sm" data-decline="' + esc(i.id) + '">Recusar</button></div></div>'; }).join('') + '</section>' : '') +
@@ -395,7 +430,7 @@
       '<div class="fg-legend"><span><i class="fg-dot on"></i> Online agora</span><span><i class="fg-dot off"></i> Offline — receberá o convite ao entrar</span></div><div class="fg-grid" id="fgPeople"></div></section></div>';
 
     bindGameNav(container);
-    var capyImage=container.querySelector('.fg-capy-mascot>img');if(capyImage)capyImage.addEventListener('error',function(){this.style.display='none';var mascot=this.parentNode;if(mascot)mascot.classList.add('fg-capy-fallback');});
+    startMascotRotation(container);
 
     function paintPeople(filter) {
       var target = container.querySelector('#fgPeople');
@@ -426,7 +461,7 @@
 
   function renderSolo(container) {
     setMusicMode('ambient');
-    container.innerHTML = '<style>' + styles + '</style><div class="fg-game-frame"><div class="fg-framebar"><button class="btn btn-ghost btn-sm" id="fgBack"><i class="ti ti-arrow-left"></i> Voltar à comunidade</button><span>Modo de treino · progresso salvo neste aparelho</span></div><iframe title="FisioGame — modo de treino" src="fisiogame.html?v=44"></iframe></div>';
+    container.innerHTML = '<style>' + styles + '</style><div class="fg-game-frame"><div class="fg-framebar"><button class="btn btn-ghost btn-sm" id="fgBack"><i class="ti ti-arrow-left"></i> Voltar à comunidade</button><span>Modo de treino · progresso salvo neste aparelho</span></div><iframe title="FisioGame — modo de treino" src="fisiogame.html?v=45"></iframe></div>';
     container.querySelector('#fgBack').addEventListener('click', function () { renderView(container); });
   }
 
@@ -622,6 +657,9 @@
   var mascotScaleStyles='.fg-capy-mascot{width:248px!important;height:245px!important;flex-basis:248px!important}.fg-capy-mascot>img{width:242px!important;height:242px!important}.fg-capy-mascot>small{top:5px!important;right:3px!important;font-size:12px!important}.fg-hero-stage{align-items:center!important}@media(max-width:1050px){.fg-capy-mascot{width:190px!important;height:195px!important;flex-basis:190px!important}.fg-capy-mascot>img{width:190px!important;height:190px!important}.fg-capy-mascot>small{font-size:10px!important}}@media(max-width:700px){.fg-capy-mascot{width:150px!important;height:158px!important;flex-basis:150px!important}.fg-capy-mascot>img{width:154px!important;height:154px!important}.fg-capy-mascot>small{display:block!important;top:-2px!important;right:-4px!important;font-size:9px!important}.fg-hero-stage{align-items:flex-end!important}}@media(max-width:420px){.fg-capy-mascot{width:118px!important;height:126px!important;flex-basis:118px!important}.fg-capy-mascot>img{width:124px!important;height:124px!important}.fg-capy-mascot>small{font-size:7px!important;padding:5px 7px!important}.fg-hero-actions{min-width:140px!important}}@media(max-width:359px){.fg-capy-mascot{width:102px!important;height:110px!important;flex-basis:102px!important}.fg-capy-mascot>img{width:108px!important;height:108px!important}.fg-capy-mascot>small{display:none!important}}';
   styles += mascotScaleStyles;
   progressStyles += mascotScaleStyles;
+  var mascotRotationStyles='.fg-capy-mascot{animation:fgCapyBreathe 3.2s ease-in-out infinite}.fg-capy-mascot>img.fg-capy-frame{position:absolute!important;left:50%!important;bottom:0!important;grid-area:auto!important;opacity:0!important;visibility:hidden!important;transform:translateX(-50%) scale(.94)!important;transition:opacity .65s ease,transform .65s cubic-bezier(.2,.75,.25,1),visibility 0s linear .65s!important;animation:none!important;pointer-events:none}.fg-capy-mascot>img.fg-capy-frame.is-active{opacity:1!important;visibility:visible!important;transform:translateX(-50%) scale(1)!important;transition-delay:0s!important}.fg-capy-mascot>img.fg-capy-frame.has-error{display:none!important}.fg-capy-mascot>small{transition:opacity .25s ease,transform .25s ease}@media(prefers-reduced-motion:reduce){.fg-capy-mascot{animation:none!important}.fg-capy-mascot>img.fg-capy-frame{transition:none!important}}';
+  styles += mascotRotationStyles;
+  progressStyles += mascotRotationStyles;
 
   window.AvaliaClinViews = window.AvaliaClinViews || {};
   window.FisioGameOnline = { start:start, stop:stop, render:renderView, setAudioActive:setAudioActive, renderAdminDashboard:renderAdminDashboard, refresh:function(){return Promise.all([loadPresence(),loadInvites()]);} };
