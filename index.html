@@ -11202,6 +11202,7 @@ function pode(acao) {
   function navigateTo(view, opts) {
     if (!VIEW_META[view]) view = 'dashboard';
     $all('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    if (window.FisioGameOnline && window.FisioGameOnline.setAudioActive) window.FisioGameOnline.setAudioActive(view === 'jogar');
     $('#viewTitle').textContent = VIEW_META[view].title;
     $('#viewSubtitle').textContent = VIEW_META[view].sub;
 
@@ -13743,7 +13744,7 @@ function pode(acao) {
 </script>
 
 <script src="aluno-primeiro-acesso.js"></script>
-<script src="fisio-online.js?v=43"></script>
-<script src="fisio-beta.js?v=43"></script>
+<script src="fisio-online.js?v=44"></script>
+<script src="fisio-beta.js?v=44"></script>
 </body>
 </html>

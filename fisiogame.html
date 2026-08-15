@@ -772,6 +772,7 @@ function showScreen(id){
 $("#start-btn").addEventListener("click", startGame);
 
 function startGame(){
+  if(AUDIO.setMode) AUDIO.setMode('match');
   const n = state.mode==="solo" ? 1 : state.playerCount;
   const players=[];
   for(let i=0;i<n;i++){

@@ -10,16 +10,19 @@
   var gameProfile = null;
   var gameRanking = [];
   var ONLINE_MS = 45000;
-  var audioState={ctx:null,musicTimer:null,musicStep:0,music:localStorage.getItem('fg_music')!=='off',sfx:localStorage.getItem('fg_sfx')!=='off',volume:Math.min(1,Math.max(.82,Number(localStorage.getItem('fg_volume')||.82)))};
+  var audioActive=false;
+  var audioState={ctx:null,musicTimer:null,musicStep:0,music:localStorage.getItem('fg_music')!=='off',sfx:localStorage.getItem('fg_sfx')!=='off',volume:Math.min(1,Math.max(.82,Number(localStorage.getItem('fg_volume')||.82))),mode:'ambient'};
   function audioContext(){if(!audioState.ctx){var AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;audioState.ctx=new AC();}if(audioState.ctx.state==='suspended')audioState.ctx.resume();return audioState.ctx;}
   function tone(freq,duration,type,gain,delay){var c=audioContext();if(!c)return;var o=c.createOscillator(),g=c.createGain(),now=c.currentTime+(delay||0);o.type=type||'sine';o.frequency.setValueAtTime(freq,now);g.gain.setValueAtTime(0.0001,now);g.gain.exponentialRampToValueAtTime(Math.max(.0001,(gain||.08)*audioState.volume),now+.018);g.gain.exponentialRampToValueAtTime(.0001,now+duration);o.connect(g);g.connect(c.destination);o.start(now);o.stop(now+duration+.03);}
-  function sound(name){if(!audioState.sfx)return;var notes={click:[[520,.07,'sine',.035,0]],tick:[[720,.035,'square',.018,0]],spin:[[110,.75,'sawtooth',.022,0],[165,.7,'triangle',.035,.05],[220,.6,'triangle',.03,.12]],land:[[660,.12,'sine',.07,0],[880,.22,'sine',.07,.1]],question:[[392,.11,'triangle',.05,0],[523,.13,'triangle',.06,.08],[659,.24,'sine',.06,.17]],turn:[[330,.1,'sine',.04,0],[440,.17,'sine',.05,.09]],correct:[[523,.13,'triangle',.08,0],[659,.13,'triangle',.08,.09],[784,.27,'triangle',.09,.18]],wrong:[[220,.18,'sawtooth',.045,0],[165,.28,'sawtooth',.04,.13]],message:[[740,.09,'sine',.05,0],[988,.12,'sine',.04,.08]],unlock:[[523,.14,'triangle',.07,0],[659,.14,'triangle',.07,.1],[784,.14,'triangle',.08,.2],[1047,.36,'sine',.08,.3]],victory:[[392,.12,'triangle',.07,0],[523,.12,'triangle',.08,.1],[659,.14,'triangle',.08,.2],[784,.4,'sine',.1,.32]]};(notes[name]||notes.click).forEach(function(n){tone.apply(null,n);});}
-  function musicBeat(){if(!audioState.music)return;var chords=[[261.6,329.6,392],[293.7,370,440],[246.9,311.1,392],[220,277.2,329.6]],ch=chords[Math.floor(audioState.musicStep/4)%chords.length],mel=[523,587,659,784,659,587,523,440,494,587,659,740,659,587,494,440][audioState.musicStep%16];ch.forEach(function(n,i){tone(n,.78,'sine',.028,i*.018);});tone(mel,.25,'triangle',.038,.03);audioState.musicStep++;}
-  function startMusic(){audioContext();if(!audioState.musicTimer){musicBeat();audioState.musicTimer=setInterval(musicBeat,900);}}
+  function sound(name){if(!audioActive||!audioState.sfx)return;var notes={click:[[520,.07,'sine',.035,0]],tick:[[720,.035,'square',.018,0]],spin:[[110,.75,'sawtooth',.022,0],[165,.7,'triangle',.035,.05],[220,.6,'triangle',.03,.12]],land:[[660,.12,'sine',.07,0],[880,.22,'sine',.07,.1]],question:[[392,.11,'triangle',.05,0],[523,.13,'triangle',.06,.08],[659,.24,'sine',.06,.17]],turn:[[330,.1,'sine',.04,0],[440,.17,'sine',.05,.09]],correct:[[523,.13,'triangle',.08,0],[659,.13,'triangle',.08,.09],[784,.27,'triangle',.09,.18]],wrong:[[220,.18,'sawtooth',.045,0],[165,.28,'sawtooth',.04,.13]],message:[[740,.09,'sine',.05,0],[988,.12,'sine',.04,.08]],unlock:[[523,.14,'triangle',.07,0],[659,.14,'triangle',.07,.1],[784,.14,'triangle',.08,.2],[1047,.36,'sine',.08,.3]],victory:[[392,.12,'triangle',.07,0],[523,.12,'triangle',.08,.1],[659,.14,'triangle',.08,.2],[784,.4,'sine',.1,.32]]};(notes[name]||notes.click).forEach(function(n){tone.apply(null,n);});}
+  function musicBeat(){if(!audioActive||!audioState.music)return;if(audioState.mode==='match'){var bass=[130.8,130.8,146.8,164.8,123.5,123.5,146.8,164.8],lead=[523,659,784,659,587,698,880,698],i=audioState.musicStep%8;tone(bass[i],.32,'square',.032,0);tone(lead[i],.18,'triangle',.045,.025);if(i%2===0)tone(1046,.045,'square',.018,.02);audioState.musicStep++;return;}var chords=[[261.6,329.6,392],[293.7,370,440],[246.9,311.1,392],[220,277.2,329.6]],ch=chords[Math.floor(audioState.musicStep/4)%chords.length],mel=[523,587,659,784,659,587,523,440,494,587,659,740,659,587,494,440][audioState.musicStep%16];ch.forEach(function(n,j){tone(n,.78,'sine',.028,j*.018);});tone(mel,.25,'triangle',.038,.03);audioState.musicStep++;}
+  function startMusic(){if(!audioActive)return;audioContext();if(!audioState.musicTimer){musicBeat();audioState.musicTimer=setInterval(musicBeat,audioState.mode==='match'?360:900);}}
   function stopMusic(){if(audioState.musicTimer){clearInterval(audioState.musicTimer);audioState.musicTimer=null;}}
   function refreshSoundDock(){var d=document.getElementById('fgSoundDock');if(!d)return;d.querySelector('[data-fg-music]').classList.toggle('off',!audioState.music);d.querySelector('[data-fg-sfx]').classList.toggle('off',!audioState.sfx);d.querySelector('[data-fg-music] i').className='ti '+(audioState.music?'ti-music':'ti-music-off');d.querySelector('[data-fg-sfx] i').className='ti '+(audioState.sfx?'ti-volume':'ti-volume-off');}
   function ensureSoundDock(){if(document.getElementById('fgSoundDock'))return;var style=document.createElement('style');style.textContent='.fg-sound-dock{position:fixed;right:18px;bottom:18px;z-index:9998;display:flex;gap:7px;padding:7px;border-radius:16px;background:rgba(19,60,55,.9);box-shadow:0 12px 30px rgba(12,45,41,.25);backdrop-filter:blur(12px)}.fg-sound-dock button{width:39px;height:39px;border:1px solid rgba(255,255,255,.25);border-radius:11px;background:#f0c861;color:#173f3a;font-size:18px;cursor:pointer;transition:.2s}.fg-sound-dock button:hover{transform:translateY(-2px)}.fg-sound-dock button.off{background:rgba(255,255,255,.1);color:#fff}@media(max-width:600px){.fg-sound-dock{right:10px;bottom:74px;transform:scale(.9);transform-origin:right bottom}}';document.head.appendChild(style);var d=document.createElement('div');d.id='fgSoundDock';d.className='fg-sound-dock';d.innerHTML='<button data-fg-music title="Música de fundo"><i class="ti ti-music"></i></button><button data-fg-sfx title="Efeitos sonoros"><i class="ti ti-volume"></i></button>';document.body.appendChild(d);d.querySelector('[data-fg-music]').onclick=function(){audioState.music=!audioState.music;localStorage.setItem('fg_music',audioState.music?'on':'off');if(audioState.music)startMusic();else stopMusic();refreshSoundDock();sound('click');};d.querySelector('[data-fg-sfx]').onclick=function(){audioState.sfx=!audioState.sfx;localStorage.setItem('fg_sfx',audioState.sfx?'on':'off');refreshSoundDock();sound('click');};refreshSoundDock();}
-  window.FisioGameAudio={sound:sound,start:startMusic,stop:stopMusic,state:audioState};
+  function setMusicMode(mode){mode=mode==='match'?'match':'ambient';if(audioState.mode===mode)return;stopMusic();audioState.mode=mode;audioState.musicStep=0;if(audioActive&&audioState.music)startMusic();}
+  function setAudioActive(active){audioActive=!!active;if(audioActive){ensureSoundDock();setMusicMode('ambient');if(audioState.music)startMusic();}else{stopMusic();var dock=document.getElementById('fgSoundDock');if(dock)dock.remove();}}
+  window.FisioGameAudio={sound:sound,start:startMusic,stop:stopMusic,setMode:setMusicMode,state:audioState};
   var GAME_CATEGORIES = [
     {id:'anatomia',name:'Anatomia',color:'#d96b5f'}, {id:'cinesio',name:'Cinesiologia',color:'#d8a83e'},
     {id:'orto',name:'Ortopedia',color:'#3b82c4'}, {id:'neuro',name:'Neurologia',color:'#8858b5'},
@@ -371,6 +374,7 @@
   }
 
   function renderView(container) {
+    setMusicMode('ambient');
     if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) {
       window.FisioGameBeta.render(container);
       return;
@@ -421,11 +425,13 @@
   }
 
   function renderSolo(container) {
-    container.innerHTML = '<style>' + styles + '</style><div class="fg-game-frame"><div class="fg-framebar"><button class="btn btn-ghost btn-sm" id="fgBack"><i class="ti ti-arrow-left"></i> Voltar à comunidade</button><span>Modo de treino · progresso salvo neste aparelho</span></div><iframe title="FisioGame — modo de treino" src="fisiogame.html?v=41"></iframe></div>';
+    setMusicMode('ambient');
+    container.innerHTML = '<style>' + styles + '</style><div class="fg-game-frame"><div class="fg-framebar"><button class="btn btn-ghost btn-sm" id="fgBack"><i class="ti ti-arrow-left"></i> Voltar à comunidade</button><span>Modo de treino · progresso salvo neste aparelho</span></div><iframe title="FisioGame — modo de treino" src="fisiogame.html?v=44"></iframe></div>';
     container.querySelector('#fgBack').addEventListener('click', function () { renderView(container); });
   }
 
   function renderMatchWheel(match,state,q,category,mine,mySeals,otherSeals,otherName) {
+    setMusicMode('match');
     var container=document.getElementById('viewContent'), s=current();
     if(!container)return;
     var otherId=mine?match.jogador_2_id:match.jogador_1_id;
@@ -445,6 +451,7 @@
   }
 
   function renderMatch(match) {
+    setMusicMode('match');
     var container = document.getElementById('viewContent');
     if (!container) return;
     var s=current(), state=typeof match.estado==='string'?JSON.parse(match.estado):match.estado||{}, q=GAME_QUESTIONS.find(function(x){return x.id===state.questao_id;})||pickQuestion(state.usadas), mine=match.jogador_1_id===s.id, mySeals=mine?(state.selos_1||[]):(state.selos_2||[]), otherSeals=mine?(state.selos_2||[]):(state.selos_1||[]), myTurn=match.turno_id===s.id, otherName=mine?match.jogador_2_nome:match.jogador_1_nome, otherId=mine?match.jogador_2_id:match.jogador_1_id, category=GAME_CATEGORIES.find(function(c){return c.id===q.cat;})||GAME_CATEGORIES[0];
@@ -559,8 +566,7 @@
     if (running || !allowed()) return;
     if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) return;
     running = true;
-    ensureSoundDock();
-    if(!document.documentElement.dataset.fgAudioBound){document.documentElement.dataset.fgAudioBound='1';document.addEventListener('pointerdown',function(e){if(!running)return;if(e.target.closest&&e.target.closest('button')&&!e.target.closest('#fgSoundDock'))sound('click');if(audioState.music)startMusic();},{passive:true});}
+    if(!document.documentElement.dataset.fgAudioBound){document.documentElement.dataset.fgAudioBound='1';document.addEventListener('pointerdown',function(e){if(!running||!audioActive)return;if(e.target.closest&&e.target.closest('button')&&!e.target.closest('#fgSoundDock'))sound('click');if(audioState.music)startMusic();},{passive:true});}
     heartbeat(false); loadPresence(); loadInvites(); loadMatches(); loadChatNotifications(); loadGameProfile(); loadRanking();
     timers.push(setInterval(function () { heartbeat(false); }, 20000));
     timers.push(setInterval(loadPresence, 8000));
@@ -572,7 +578,7 @@
   function stop() {
     if (!running) return;
     heartbeat(true);
-    timers.forEach(clearInterval); timers=[]; running=false; presence={}; invites=[]; paintBadge(); stopMusic(); var dock=document.getElementById('fgSoundDock');if(dock)dock.remove();
+    timers.forEach(clearInterval); timers=[]; running=false; presence={}; invites=[]; paintBadge(); setAudioActive(false);
   }
 
 
@@ -613,8 +619,11 @@
   var mascotStyles='.fg-capy-mascot{display:grid!important;place-items:end center!important;width:168px!important;height:178px!important;position:relative!important;flex:0 0 168px!important;background:transparent!important;border-radius:0!important;box-shadow:none!important;overflow:visible!important;isolation:isolate}.fg-capy-mascot:before,.fg-capy-mascot:after,.fg-capy-mascot .fg-mascot-face,.fg-capy-mascot>em{display:none!important}.fg-capy-mascot>img{display:block!important;width:168px!important;height:168px!important;max-width:none!important;object-fit:contain!important;object-position:center bottom!important;filter:drop-shadow(0 17px 16px rgba(4,35,31,.28));transform-origin:center bottom;animation:fgCapyBreathe 3.2s ease-in-out infinite}.fg-capy-mascot.fg-capy-fallback:before{content:"🦫"!important;display:grid!important;place-items:center!important;width:132px;height:132px;border-radius:50%;background:linear-gradient(145deg,#f3d070,#d99c35);font-size:72px;filter:drop-shadow(0 13px 14px rgba(4,35,31,.25))}.fg-capy-mascot>small{z-index:3!important;top:-4px!important;right:-8px!important;bottom:auto!important;white-space:nowrap;font-size:11px!important;padding:8px 11px!important;border:2px solid rgba(23,63,58,.08);animation:fgPop .6s .3s both,fgCapyBubble 3s 1s ease-in-out infinite!important}.fg-capy-mascot>small:after{content:"";position:absolute;right:21px;bottom:-8px;width:14px;height:14px;background:#fff;transform:rotate(45deg);border-right:2px solid rgba(23,63,58,.08);border-bottom:2px solid rgba(23,63,58,.08)}@keyframes fgCapyBreathe{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-6px) rotate(1deg)}}@keyframes fgCapyBubble{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}@media(max-width:850px){.fg-capy-mascot{width:132px!important;height:145px!important;flex-basis:132px!important}.fg-capy-mascot>img{width:138px!important;height:138px!important}.fg-capy-mascot>small{display:block!important;right:-2px!important;top:-6px!important;font-size:9px!important}}@media(max-width:600px){.fg-capy-mascot{width:108px!important;height:120px!important;flex-basis:108px!important}.fg-capy-mascot>img{width:116px!important;height:116px!important}.fg-capy-mascot.fg-capy-fallback:before{width:92px;height:92px;font-size:52px}.fg-capy-mascot>small{font-size:8px!important;padding:6px 8px!important;right:-7px!important}}@media(max-width:359px){.fg-capy-mascot{display:grid!important;width:82px!important;height:96px!important;flex-basis:82px!important}.fg-capy-mascot>img{width:92px!important;height:92px!important}.fg-capy-mascot>small{display:none!important}}@media(prefers-reduced-motion:reduce){.fg-capy-mascot>img,.fg-capy-mascot>small{animation:none!important}}';
   styles += mascotStyles;
   progressStyles += mascotStyles;
+  var mascotScaleStyles='.fg-capy-mascot{width:248px!important;height:245px!important;flex-basis:248px!important}.fg-capy-mascot>img{width:242px!important;height:242px!important}.fg-capy-mascot>small{top:5px!important;right:3px!important;font-size:12px!important}.fg-hero-stage{align-items:center!important}@media(max-width:1050px){.fg-capy-mascot{width:190px!important;height:195px!important;flex-basis:190px!important}.fg-capy-mascot>img{width:190px!important;height:190px!important}.fg-capy-mascot>small{font-size:10px!important}}@media(max-width:700px){.fg-capy-mascot{width:150px!important;height:158px!important;flex-basis:150px!important}.fg-capy-mascot>img{width:154px!important;height:154px!important}.fg-capy-mascot>small{display:block!important;top:-2px!important;right:-4px!important;font-size:9px!important}.fg-hero-stage{align-items:flex-end!important}}@media(max-width:420px){.fg-capy-mascot{width:118px!important;height:126px!important;flex-basis:118px!important}.fg-capy-mascot>img{width:124px!important;height:124px!important}.fg-capy-mascot>small{font-size:7px!important;padding:5px 7px!important}.fg-hero-actions{min-width:140px!important}}@media(max-width:359px){.fg-capy-mascot{width:102px!important;height:110px!important;flex-basis:102px!important}.fg-capy-mascot>img{width:108px!important;height:108px!important}.fg-capy-mascot>small{display:none!important}}';
+  styles += mascotScaleStyles;
+  progressStyles += mascotScaleStyles;
 
   window.AvaliaClinViews = window.AvaliaClinViews || {};
-  window.FisioGameOnline = { start:start, stop:stop, render:renderView, renderAdminDashboard:renderAdminDashboard, refresh:function(){return Promise.all([loadPresence(),loadInvites()]);} };
+  window.FisioGameOnline = { start:start, stop:stop, render:renderView, setAudioActive:setAudioActive, renderAdminDashboard:renderAdminDashboard, refresh:function(){return Promise.all([loadPresence(),loadInvites()]);} };
   window.addEventListener('beforeunload', function () { if (running) heartbeat(true); });
 })();
