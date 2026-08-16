@@ -50,6 +50,8 @@
     --cat-neuro:#4067A8;
     --cat-cardio:#A8477A;
     --cat-saude:#7A5C9E;
+    --cat-hospitalar:#5869B2;
+    --cat-esportiva:#DF7B32;
     --font-display:'Fraunces', serif;
     --font-body:'Manrope', sans-serif;
     --font-mono:'Space Grotesk', monospace;
@@ -178,13 +180,11 @@
   .dial-wrap{ width:clamp(220px, 42vw, 300px); aspect-ratio:1/1; position:relative; }
   .dial{
     position:absolute; inset:0; border-radius:50%;
-    background: conic-gradient(from -30deg,
-      var(--cat-anatomia) 0deg 60deg,
-      var(--cat-cinesio) 60deg 120deg,
-      var(--cat-orto) 120deg 180deg,
-      var(--cat-neuro) 180deg 240deg,
-      var(--cat-cardio) 240deg 300deg,
-      var(--cat-saude) 300deg 360deg);
+    background: conic-gradient(from -22.5deg,
+      var(--cat-anatomia) 0deg 45deg,var(--cat-cinesio) 45deg 90deg,
+      var(--cat-orto) 90deg 135deg,var(--cat-neuro) 135deg 180deg,
+      var(--cat-cardio) 180deg 225deg,var(--cat-saude) 225deg 270deg,
+      var(--cat-hospitalar) 270deg 315deg,var(--cat-esportiva) 315deg 360deg);
     box-shadow: var(--shadow), inset 0 0 0 7px var(--surface), inset 0 0 0 8px var(--line);
   }
   .dial-face{
@@ -314,7 +314,7 @@
   .wheel-rot{position:absolute;inset:4%;border-radius:50%;transition:transform 4.2s cubic-bezier(.08,.72,.12,1);will-change:transform}
   .wheel-rot::before{content:'';position:absolute;inset:-13px;border-radius:50%;background:linear-gradient(145deg,#ffe49a,#c88c2f 55%,#fff0b6);box-shadow:inset 0 0 0 4px #9d651c,inset 0 0 0 9px #f7cc67,0 10px 0 #8c5b21;z-index:-1}
   .wheel-rot::after{content:'';position:absolute;inset:2px;border-radius:50%;box-shadow:inset 0 0 0 3px rgba(255,255,255,.65),inset 0 0 24px rgba(5,42,37,.2);pointer-events:none}
-  .dial{box-shadow:none;inset:0;background:conic-gradient(from -30deg,#43a568 0 60deg,#3689cc 60deg 120deg,#ef8744 120deg 180deg,#8a58bd 180deg 240deg,#25a8a2 240deg 300deg,#e7bc39 300deg 360deg)}
+  .dial{box-shadow:none;inset:0;background:conic-gradient(from -22.5deg,#43a568 0 45deg,#3689cc 45deg 90deg,#ef8744 90deg 135deg,#8a58bd 135deg 180deg,#d74c72 180deg 225deg,#338f75 225deg 270deg,#5869b2 270deg 315deg,#df7b32 315deg 360deg)}
   .cat-icon-wrap{inset:0}.cat-icon{top:9%;width:38px;height:38px;margin-left:-19px;background:rgba(255,255,255,.2);border:2px solid rgba(255,255,255,.72);border-radius:13px;padding:7px;filter:drop-shadow(0 3px 4px rgba(0,0,0,.2))}
   .ticks{display:none}.dial-face{inset:31%;z-index:5;background:linear-gradient(145deg,#fff8d9,#f2c65f);border:5px solid #fff1b5;box-shadow:0 0 0 5px #a86f20,0 8px 15px rgba(63,37,5,.3);cursor:pointer;transition:.2s}
   .dial-face:hover{transform:scale(1.04)}.dial-face span{font-family:var(--font-display);font-size:clamp(13px,2vw,18px);color:#694213;text-transform:uppercase;line-height:1.05;text-shadow:0 1px #fff;white-space:pre-line}
@@ -356,7 +356,7 @@
   <div class="brand">
     <span class="eyebrow">Perguntados da Fisioterapia</span>
     <h1>Fisio<em>Game</em></h1>
-    <p>Gire o goniômetro, acerte as perguntas e complete as 6 áreas da fisioterapia antes dos seus colegas.</p>
+    <p>Gire o goniômetro, acerte as perguntas e complete as 8 áreas da fisioterapia antes dos seus colegas.</p>
     <div class="sound-mini"><button id="music-toggle" title="Música de fundo">♫</button><button id="sfx-toggle" title="Efeitos sonoros">🔊</button></div>
   </div>
 
@@ -387,7 +387,7 @@
           <li><b>1</b> Gire o goniômetro para sortear a área.</li>
           <li><b>2</b> Responda em até 25s. Acertou? Some o selo da área e gire de novo.</li>
           <li><b>3</b> Errou? A vez passa para o próximo jogador.</li>
-          <li><b>4</b> Primeiro a completar as 6 áreas recebe alta.</li>
+          <li><b>4</b> Primeiro a completar as 8 áreas recebe alta.</li>
         </ul>
 
         <button class="start-btn" id="start-btn" type="button">Iniciar partida</button>
@@ -448,7 +448,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l6.5 2.7v5.4c0 4.6-3.2 6.9-6.5 8.3-3.3-1.4-6.5-3.7-6.5-8.3V5.9L12 3.2z"/><path d="m9 12 2 2 4-4"/></svg>
       </div>
       <h2 id="end-title">Vencedor</h2>
-      <p id="end-sub">Completou as 6 áreas do FisioGame.</p>
+      <p id="end-sub">Completou as 8 áreas do FisioGame.</p>
       <div class="end-stats" id="end-stats"></div>
       <div class="end-actions">
         <button class="primary" id="play-again-btn" type="button">Jogar novamente</button>
@@ -477,8 +477,10 @@ const CATEGORIES = [
     icon:'<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.3c-2.4 0-3.9 1.9-3.9 3.8-1.4.5-1.9 2-1.2 3.2-1 1-.7 2.9 1 3.6 0 1.9 1.7 2.9 3.2 2.4.8 1 2.4 1 2.9-.3 1.7.6 3.4-.5 3.4-2.1 1.6-.3 2.4-2 1.6-3.4 1-1 .5-2.9-1-3.2.2-1.9-1.3-3.8-3.4-3.8-.5-1.3-2-2.1-3.6-1.8"/><path d="M12 5.2v13.6"/></g>' },
   { id:"cardio", name:"Cardiorrespiratória", color:"var(--cat-cardio)",
     icon:'<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19.5C4.8 13.8 3 9.3 6 6.7 8.3 4.9 11 6.1 12 8.4 13 6.1 15.7 4.9 18 6.7c3 2.6 1.2 7.1-6 12.8z"/><path d="M4.3 12.6h3.4l1.3-2.6 1.7 4.3 1.3-2.6h5.7" stroke-width="1.5"/></g>' },
-  { id:"saude", name:"Saúde Coletiva, Ética & UTI", color:"var(--cat-saude)",
+  { id:"saude", name:"Saúde Coletiva", color:"var(--cat-saude)",
     icon:'<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l6.5 2.7v5.4c0 4.6-3.2 6.9-6.5 8.3-3.3-1.4-6.5-3.7-6.5-8.3V5.9L12 3.2z"/><path d="M12 8.4v7M8.5 11.9h7"/></g>' }
+  ,{ id:"hospitalar", name:"Hospitalar", color:"var(--cat-hospitalar)", icon:'<g fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M12 7v8M8 11h8M8 21v-4h8v4"/></g>' }
+  ,{ id:"esportiva", name:"Fisioterapia Esportiva", color:"var(--cat-esportiva)", icon:'<g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 5 4 3 4-3M3 12l5 2-1 5m14-7-5 2 1 5m-9-5h8"/></g>' }
 ];
 
 const QUESTIONS = {
@@ -661,6 +663,14 @@ const QUESTIONS = {
       e:"PAV é uma infecção pulmonar que pode ocorrer em pacientes sob ventilação mecânica invasiva prolongada." },
     { q:"Durante o estágio supervisionado, o aluno de fisioterapia deve atuar sob supervisão direta de:", a:["Um fisioterapeuta preceptor/docente responsável","Colegas de turma apenas","Apenas da coordenação administrativa","Nenhuma supervisão é necessária"], c:0,
       e:"O estágio supervisionado exige acompanhamento de um preceptor ou docente responsável, garantindo segurança ao paciente." }
+  ],
+  hospitalar: [
+    { q:"Na UTI, a mobilização precoce busca principalmente:", a:["Prolongar a imobilidade","Reduzir perdas funcionais da internação","Suspender toda monitorização","Substituir a equipe multiprofissional"], c:1, e:"A mobilização precoce ajuda a reduzir descondicionamento e perdas funcionais associadas à internação." },
+    { q:"Antes de mobilizar um paciente crítico, deve-se verificar prioritariamente:", a:["Horário da visita","Estabilidade clínica e parâmetros vitais","Preferência alimentar","Tempo de internação isoladamente"], c:1, e:"A segurança da mobilização depende da avaliação clínica, hemodinâmica e respiratória." }
+  ],
+  esportiva: [
+    { q:"O retorno seguro ao esporte deve ser orientado principalmente por:", a:["Tempo transcorrido apenas","Critérios funcionais e avaliação clínica","Vontade isolada do atleta","Ausência completa de exercício"], c:1, e:"Critérios funcionais, avaliação clínica e demandas do esporte orientam o retorno seguro." },
+    { q:"O treinamento neuromuscular pode prevenir lesões ao melhorar:", a:["Apenas massa corporal","Controle motor, força e estabilidade","Somente flexibilidade passiva","Apenas frequência respiratória"], c:1, e:"Controle motor, força, equilíbrio e estabilidade são componentes relevantes para prevenção de lesões." }
   ]
 };
 
@@ -807,9 +817,9 @@ function buildDial(){
   CATEGORIES.forEach((cat,i)=>{
     const wrap = el("div");
     wrap.style.position="absolute"; wrap.style.inset="0";
-    wrap.style.transform = "rotate("+(i*60)+"deg)";
+    wrap.style.transform = "rotate("+(i*45)+"deg)";
     const icon = el("div","cat-icon");
-    icon.style.transform = "rotate("+(-i*60)+"deg)";
+    icon.style.transform = "rotate("+(-i*45)+"deg)";
     icon.innerHTML = '<svg viewBox="0 0 24 24">'+cat.icon+'</svg>';
     wrap.appendChild(icon);
     iconsWrap.appendChild(wrap);
@@ -819,7 +829,7 @@ function buildDial(){
 }
 
 function spinTo(catIndex){
-  const targetMod = -catIndex*60;
+  const targetMod = -catIndex*45;
   const base = state.needleRotation - (state.needleRotation % 360);
   let next = base + 360*6 + targetMod;
   if(next <= state.needleRotation) next += 360;
@@ -986,7 +996,7 @@ function onContinue(){
     if(!player.tokens.includes(cat.id)){
       player.tokens.push(cat.id);
       updateHudTokens(state.current);
-      if(player.tokens.length===6){ endGame(player); return; }
+      if(player.tokens.length===8){ endGame(player); return; }
     }
     updateTurnBar(player.name+" acertou! Gire de novo.");
   } else {
@@ -1011,14 +1021,14 @@ function buildHud(){
     const initials = p.name.trim().slice(0,2).toUpperCase();
     let dots = "";
     CATEGORIES.forEach((cat,ci)=>{
-      dots += '<div class="mini-dot" id="dot-'+i+'-'+ci+'" style="--dotcolor:'+cat.color+'; transform:rotate('+(ci*60)+'deg)"><i></i></div>';
+      dots += '<div class="mini-dot" id="dot-'+i+'-'+ci+'" style="--dotcolor:'+cat.color+'; transform:rotate('+(ci*45)+'deg)"><i></i></div>';
     });
     let photo="";
     try{if(parent!==window&&parent.db_load){const db=parent.db_load(),sess=parent.session_get&&parent.session_get(),all=[...(db.users||[]),...(db.alunos||[])];const person=(i===0&&sess?all.find(x=>String(x.id)===String(sess.id)||String(x.id)===String(sess.alunoId)):null)||all.find(x=>String(x.nome||"").toLowerCase()===String(p.name||"").toLowerCase());photo=person&&person.fotoDataUrl||""}}catch(e){}
     card.innerHTML =
       '<div class="avatar">'+(photo?'<img src="'+photo+'" alt="">':initials)+'</div>'+
       '<div class="mini-dial">'+dots+'</div>'+
-      '<div class="player-meta"><span class="pname">'+p.name+'</span><span class="pscore" id="pscore-'+i+'">0/6</span></div>';
+      '<div class="player-meta"><span class="pname">'+p.name+'</span><span class="pscore" id="pscore-'+i+'">0/8</span></div>';
     hud.appendChild(card);
   });
   highlightActivePlayer();
@@ -1029,7 +1039,7 @@ function updateHudTokens(playerIdx){
     const dot = $("#dot-"+playerIdx+"-"+ci);
     if(player.tokens.includes(cat.id)) dot.classList.add("filled");
   });
-  $("#pscore-"+playerIdx).textContent = player.tokens.length+"/6";
+  $("#pscore-"+playerIdx).textContent = player.tokens.length+"/8";
 }
 function highlightActivePlayer(){
   state.players.forEach((p,i)=>{
@@ -1049,14 +1059,14 @@ function endGame(winner){
   AUDIO.sound('victory');
   clearInterval(state.timerInt);
   $("#end-title").textContent = winner.name+" recebeu alta!";
-  $("#end-sub").textContent = "Completou as 6 áreas do FisioGame e dominou a prova.";
+  $("#end-sub").textContent = "Completou as 8 áreas do FisioGame e dominou a prova.";
   const statsWrap = $("#end-stats");
   statsWrap.innerHTML = "";
   state.players.forEach(p=>{
     const card = el("div","end-stat-card");
     card.innerHTML =
       '<div class="pname">'+p.name+(p===winner?" 🏅":"")+'</div>'+
-      '<div class="figs"><span><b>'+p.tokens.length+'</b>/6 áreas</span><span>'+p.correct+' acertos</span><span>'+p.wrong+' erros</span></div>';
+      '<div class="figs"><span><b>'+p.tokens.length+'</b>/8 áreas</span><span>'+p.correct+' acertos</span><span>'+p.wrong+' erros</span></div>';
     statsWrap.appendChild(card);
   });
   saveLeaderboard(winner);
