@@ -6,6 +6,10 @@
 <title>FisioGame — Trivia de Fisioterapia</title>
 <script>
 (function () {
+  // O modo de treino individual foi desativado. O banco de perguntas agora
+  // deve ser consumido exclusivamente pelas partidas multijogador.
+  window.location.replace('index.html');
+  return;
   var allowed = false;
   try {
     var session = JSON.parse(sessionStorage.getItem('avaliaclin_session_v1') || 'null');
