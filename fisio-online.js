@@ -658,7 +658,7 @@
       });
       return map;
     }
-    function draw(activeMatches, presenceRows) {
+    function draw(activeMatches, presenceRows, aiHealthRows) {
       if (!container.isConnected || container.dataset.gameDashboardToken !== token) return;
       var online = onlineFrom(presenceRows);
       var players = {};
@@ -668,7 +668,9 @@
       });
       var onlineCount = Object.keys(players).filter(function (id) { return online[id]; }).length;
       var waitingCount = (activeMatches || []).filter(function (m) { return !online[m.turno_id]; }).length;
-      container.innerHTML = '<style>'+adminDashboardStyles+'</style><section class="fg-admin-dash">' +
+      var aiFailures = (aiHealthRows || []).filter(function (item) { return item.status === 'erro' && (item.categoria === 'creditos' || Number(item.falhas_consecutivas || 0) >= 3); });
+      var aiAlert = aiFailures.length ? '<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:18px;padding:15px 17px;border:1px solid #efb3a8;border-left:5px solid #d9553f;border-radius:14px;background:#fff2ef;color:#7b2b20"><i class="ti ti-alert-triangle" style="font-size:25px;color:#d9553f"></i><div style="display:grid;gap:4px"><b style="font-size:14px">Reposição de perguntas interrompida — verificar créditos da IA</b><span style="font-size:11px;line-height:1.45;color:#865047">O jogo continua funcionando com as perguntas já cadastradas. Após regularizar os créditos, o sistema tentará novamente automaticamente.</span></div></div>' : '';
+      container.innerHTML = '<style>'+adminDashboardStyles+'</style><section class="fg-admin-dash">' + aiAlert +
         '<div class="fg-admin-head"><div><span class="eyebrow">FISIOGAME EM TEMPO REAL</span><h3>Partidas em andamento</h3><p>Atualização automática a cada 10 segundos. Visível somente para administradores.</p></div><span class="fg-live"><i></i> Ao vivo</span></div>' +
         '<div class="fg-admin-metrics"><div><i class="ti ti-swords"></i><b>'+(activeMatches || []).length+'</b><span>Partidas abertas</span></div><div><i class="ti ti-users"></i><b>'+Object.keys(players).length+'</b><span>Jogadores envolvidos</span></div><div><i class="ti ti-wifi"></i><b>'+onlineCount+'</b><span>Jogadores online</span></div><div><i class="ti ti-clock-pause"></i><b>'+waitingCount+'</b><span>Aguardando jogador offline</span></div></div>' +
         '<div class="fg-admin-list">' + ((activeMatches || []).length ? (activeMatches || []).map(function (m) {
@@ -682,9 +684,10 @@
       if (!container.isConnected || container.dataset.gameDashboardToken !== token) return;
       Promise.all([
         api('/rest/v1/avalix_partidas?status=in.(ativa,pausada,aguardando)&order=atualizado_em.desc&select=*'),
-        api('/rest/v1/avalix_presenca?select=user_id,ultimo_sinal')
+        api('/rest/v1/avalix_presenca?select=user_id,ultimo_sinal'),
+        api('/rest/v1/avalix_ia_monitoramento?select=rotina,status,categoria,falhas_consecutivas,mensagem,ultimo_erro,ultimo_sucesso')
       ]).then(function (result) {
-        draw(result[0] || [], result[1] || []);
+        draw(result[0] || [], result[1] || [], result[2] || []);
       }).catch(function () {
         if (container.isConnected) container.innerHTML = '<div class="card card-pad"><b>Nao foi possivel carregar as partidas.</b><p style="margin:6px 0 0;color:var(--ac-charcoal-soft);">Verifique a conexao com o Supabase.</p></div>';
       }).then(function () {
