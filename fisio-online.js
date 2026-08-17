@@ -536,10 +536,6 @@
 
   function renderView(container) {
     setMusicMode('ambient');
-    if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) {
-      window.FisioGameBeta.render(container);
-      return;
-    }
     if (!allowed()) {
       container.innerHTML = '<div class="card card-pad"><h2>Acesso restrito</h2><p>O FisioGame está disponível para alunos, professores e administradores.</p></div>';
       return;
@@ -547,8 +543,8 @@
     var received = pendingReceived();
     var people = colleagues();
     var p=normalizeProfile(gameProfile||defaultProfile());
-    container.innerHTML = '<style>' + styles + relockStyles + progressStyles + economyStyles + missionIconStyles + '</style><div class="fg-shell">' + gameNav('home') + profileStrip(p) +
-      '<section class="fg-hero"><div class="fg-hero-shapes"><i></i><i></i><i></i></div><div class="fg-hero-copy"><span class="fg-kicker">FISIOGAME ONLINE</span><h2>Aprenda, desafie e conquiste as 8 áreas.</h2><p>Escolha um colega da comunidade Avalix e inicie um duelo clínico.</p></div><div class="fg-hero-stage"><div class="fg-mascot fg-capy-mascot" aria-hidden="true"><img class="fg-capy-frame is-active" src="capivara-fisioterapeuta.png?v=45" alt=""><img class="fg-capy-frame" src="capivara-fisioterapeuta.png?v=45" alt=""><small>Vamos nessa!</small></div><div class="fg-hero-actions"><button class="btn fg-lock-btn" id="fgRelock"><i class="ti ti-lock"></i> Bloquear acesso</button></div></div></section>' +
+    container.innerHTML = '<style>' + styles + progressStyles + economyStyles + missionIconStyles + '</style><div class="fg-shell">' + gameNav('home') + profileStrip(p) +
+      '<section class="fg-hero"><div class="fg-hero-shapes"><i></i><i></i><i></i></div><div class="fg-hero-copy"><span class="fg-kicker">FISIOGAME ONLINE</span><h2>Aprenda, desafie e conquiste as 8 áreas.</h2><p>Escolha um colega da comunidade Avalix e inicie um duelo clínico.</p></div><div class="fg-hero-stage"><div class="fg-mascot fg-capy-mascot" aria-hidden="true"><img class="fg-capy-frame is-active" src="capivara-fisioterapeuta.png?v=45" alt=""><img class="fg-capy-frame" src="capivara-fisioterapeuta.png?v=45" alt=""><small>Vamos nessa!</small></div></div></section>' +
       missionsHtml(p) + classicRulesGuide() +
       (matches.length ? '<section class="fg-invites"><h3><i class="ti ti-swords"></i> Suas partidas</h3>'+matches.map(function(m){var s=current(),other=m.jogador_1_id===s.id?m.jogador_2_nome:m.jogador_1_nome,isTurn=m.turno_id===s.id;return '<div class="fg-invite"><div><b>'+esc(other)+'</b><span>'+(isTurn?'É sua vez de responder':'Aguardando a jogada do adversário')+'</span></div><button class="btn '+(isTurn?'btn-primary':'btn-ghost')+' btn-sm" data-match="'+esc(m.id)+'">Abrir partida</button></div>';}).join('')+'</section>' : '') +
       (received.length ? '<section class="fg-invites"><h3><i class="ti ti-mail-opened"></i> Convites recebidos</h3>' + received.map(function (i) { return '<div class="fg-invite"><div><b>' + esc(i.remetente_nome) + '</b><span>quer jogar uma partida com você</span></div><div><button class="btn btn-primary btn-sm" data-accept="' + esc(i.id) + '">Aceitar</button><button class="btn btn-ghost btn-sm" data-decline="' + esc(i.id) + '">Recusar</button></div></div>'; }).join('') + '</section>' : '') +
@@ -572,13 +568,6 @@
     paintPeople('');
     loadCommunityProfiles().then(function(){if(container.isConnected)paintPeople(container.querySelector('#fgSearch').value);});
     container.querySelector('#fgSearch').addEventListener('input', function () { paintPeople(this.value); });
-    container.querySelector('#fgRelock').addEventListener('click', function () {
-      stop();
-      if (window.FisioGameBeta) {
-        window.FisioGameBeta.lock();
-        window.FisioGameBeta.render(container);
-      }
-    });
     container.querySelector('#fgPeople').addEventListener('click',function(event){var b=event.target.closest('[data-invite],[data-chat],[data-cheer]');if(!b)return;var id=b.dataset.invite||b.dataset.chat||b.dataset.cheer,person=people.find(function(x){return String(x.id)===String(id);});if(!person)return;if(b.dataset.invite)invite(person);else if(b.dataset.chat)openChat(person,container);else sendCheer(person).then(function(){if(container.isConnected)renderView(container);});});
     container.querySelectorAll('[data-accept]').forEach(function (b) { b.addEventListener('click', function () { respondInvite(b.dataset.accept, true); }); });
     container.querySelectorAll('[data-decline]').forEach(function (b) { b.addEventListener('click', function () { respondInvite(b.dataset.decline, false); }); });
@@ -699,7 +688,6 @@
   function repaintIfOpen() {
     var active = document.querySelector('.nav-item.active');
     var container = document.getElementById('viewContent');
-    if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) return;
     if (active && active.dataset.view === 'jogar' && container && !container.querySelector('.fg-shell') && !container.querySelector('.fg-game-frame') && !container.querySelector('.fg-chat') && !container.querySelector('.fg-play') && !container.querySelector('.fg-page-card') && !container.querySelector('.fg-result-screen')) renderView(container);
   }
 
@@ -771,7 +759,6 @@
 
   function start() {
     if (running || !allowed()) return;
-    if (window.FisioGameBeta && !window.FisioGameBeta.hasAccess()) return;
     running = true;
     if(!document.documentElement.dataset.fgAudioBound){document.documentElement.dataset.fgAudioBound='1';document.addEventListener('pointerdown',function(e){if(!running||!audioActive)return;if(e.target.closest&&e.target.closest('button')&&!e.target.closest('#fgSoundDock'))sound('click');if(audioState.music)startMusic();},{passive:true});}
     heartbeat(false); loadPresence(); loadInvites(); loadMatches(); loadChatNotifications(); loadGameProfile(); loadRanking(); loadCommunityProfiles();
