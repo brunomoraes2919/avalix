@@ -51,7 +51,7 @@
       '<div class="fg-beta-card"><div class="fg-beta-mark"><i class="ti ti-device-gamepad-2"></i></div>' +
       '<span class="fg-beta-kicker">FISIOGAME</span><h2>Uma nova forma de aprender está chegando.</h2>' +
       '<p class="fg-beta-lead">Desafie colegas, conquiste as áreas da fisioterapia e transforme revisão em competição.</p>' +
-      '<div class="fg-beta-tags"><span><i class="ti ti-users"></i> Multijogador</span><span><i class="ti ti-bolt"></i> Tempo real</span><span><i class="ti ti-trophy"></i> 6 áreas clínicas</span></div>' +
+      '<div class="fg-beta-tags"><span><i class="ti ti-users"></i> Multijogador</span><span><i class="ti ti-bolt"></i> Tempo real</span><span><i class="ti ti-trophy"></i> 8 áreas da Fisioterapia</span></div>' +
       '<div class="fg-beta-access"><div><b>Acesso antecipado</b><span>Esta versão está disponível apenas para testadores convidados.</span></div>' +
       '<form id="fgBetaForm"><label for="fgBetaKey">Chave de acesso</label><div class="fg-beta-input"><i class="ti ti-key"></i><input id="fgBetaKey" type="password" autocomplete="off" spellcheck="false" placeholder="Digite sua chave"><button class="btn btn-primary" type="submit">Entrar</button></div><p id="fgBetaError" class="fg-beta-error">' + esc(message || '') + '</p></form></div>' +
       '<small>Em breve para toda a comunidade Avalix.</small></div></section>';
