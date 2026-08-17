@@ -162,7 +162,7 @@
     var id=p&&p.estatisticas&&p.estatisticas.__mascote;
     return GAME_CATEGORIES.find(function(c){return c.id===id;})||null;
   }
-  function mascotCover(category) { return category?'capa-mascote-'+category.id+'.webp?v=63':''; }
+  function mascotCover(category) { return category?'capa-mascote-'+category.id+'.webp?v=64':''; }
   function applyAdoptedTheme(container,p) {
     var category=adoptedCategory(p||gameProfile);
     container.classList.toggle('fg-has-adopted-mascot',!!category);
