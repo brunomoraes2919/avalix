@@ -1379,7 +1379,7 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
   function show(text,instant){
     depth++;
     clearTimeout(hideTimer);clearTimeout(showTimer);
-    showTimer=setTimeout(function(){if(depth>0&&el){shownAt=Date.now();el.classList.add('is-visible');el.setAttribute('aria-hidden','false');}},0);
+    showTimer=setTimeout(function(){if(depth>0&&el){el.classList.add('is-visible');el.setAttribute('aria-hidden','false');}},instant?0:600);
   }
   function hide(force){
     depth=force?0:Math.max(0,depth-1);if(depth)return;
@@ -1391,16 +1391,6 @@ table.report-table tr.row-media td { font-family: var(--font-mono); }
   window.AvalixLoader={show:show,hide:hide,track:track};
   show('Preparando a plataforma…',true);
   window.addEventListener('load',function(){hide();},{once:true});
-
-  var nativeFetch=window.fetch;
-  if(nativeFetch){window.fetch=function(input,init){
-    var url=typeof input==='string'?input:(input&&input.url)||'';
-    var background=/avalix_presenca|select=atualizado_em|\/avalix_partidas\?[^#]*select=\*/i.test(url)||(init&&init.avalixBackground);
-    var clean=init;if(init&&Object.prototype.hasOwnProperty.call(init,'avalixBackground')){clean=Object.assign({},init);delete clean.avalixBackground;}
-    if(!background)show('Carregando informações…');
-    var request;try{request=nativeFetch.call(this,input,clean);}catch(error){if(!background)hide();throw error;}
-    return Promise.resolve(request).finally(function(){if(!background)hide();});
-  };}
 })();
 </script>
 
