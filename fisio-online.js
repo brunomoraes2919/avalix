@@ -64,6 +64,8 @@
     {id:'e1',cat:'esportiva',q:'O retorno seguro ao esporte deve considerar principalmente:',a:['Apenas o tempo','Critérios funcionais e avaliação clínica','Somente a vontade do atleta','Ausência de exercícios'],c:1,e:'O retorno seguro considera critérios funcionais, avaliação clínica e as demandas do esporte.'},
     {id:'e2',cat:'esportiva',q:'O treinamento neuromuscular pode prevenir lesões ao melhorar:',a:['Somente massa corporal','Controle motor, força e estabilidade','Só frequência respiratória','Apenas flexibilidade passiva'],c:1,e:'O treinamento neuromuscular trabalha controle motor, força, equilíbrio e estabilidade.'}
   ];
+  var FALLBACK_QUESTIONS=GAME_QUESTIONS.slice();
+  var claimedQuestionIds={},reportedQuestionIds={},availableQuestionIds={},questionBankOwner=null,questionBankLoaded=false;
 
   function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
@@ -336,20 +338,37 @@
   }
 
   function pickQuestion(used) {
-    used=used||[]; var available=GAME_QUESTIONS.filter(function(q){return used.indexOf(q.id)<0;});
-    if(!available.length) available=GAME_QUESTIONS.slice();
-    return available[Math.floor(Math.random()*available.length)];
+    used=(used||[]).map(String); var available=GAME_QUESTIONS.filter(function(q){return used.indexOf(String(q.id))<0&&!claimedQuestionIds[String(q.id)];});
+    if(!available.length)available=GAME_QUESTIONS.filter(function(q){return used.indexOf(String(q.id))<0;});
+    if(!available.length)return null;
+    var q=available[Math.floor(Math.random()*available.length)];reserveQuestion(q);return q;
   }
   function pickQuestionByCategory(category,used){
-    used=used||[];var available=GAME_QUESTIONS.filter(function(q){return q.cat===category&&used.indexOf(q.id)<0;});
-    if(!available.length)available=GAME_QUESTIONS.filter(function(q){return q.cat===category;});
-    return available[Math.floor(Math.random()*available.length)]||pickQuestion(used);
+    used=(used||[]).map(String);var available=GAME_QUESTIONS.filter(function(q){return q.cat===category&&used.indexOf(String(q.id))<0&&!claimedQuestionIds[String(q.id)];});
+    if(!available.length)available=GAME_QUESTIONS.filter(function(q){return q.cat===category&&used.indexOf(String(q.id))<0;});
+    var q=available[Math.floor(Math.random()*available.length)]||null;reserveQuestion(q);return q;
+  }
+  function reserveQuestion(q,matchId,userId){
+    if(!q)return Promise.resolve(false);var id=String(q.id),uid=String(userId||(current()&&current().id)||'');claimedQuestionIds[id]=true;
+    if(!uid||!matchId||!q.remote||reportedQuestionIds[uid+'__'+id])return Promise.resolve(false);
+    reportedQuestionIds[uid+'__'+id]=true;
+    return api('/rest/v1/rpc/avalix_registrar_pergunta_usada',{method:'POST',body:JSON.stringify({p_usuario_id:uid,p_pergunta_id:id,p_tema:q.cat,p_partida_id:matchId||null})}).catch(function(){delete reportedQuestionIds[uid+'__'+id];return false;});
+  }
+  function loadQuestionBank(userId){
+    var uid=String(userId||(current()&&current().id)||'');if(!uid)return Promise.resolve(GAME_QUESTIONS);
+    return api('/rest/v1/rpc/avalix_perguntas_disponiveis',{method:'POST',body:JSON.stringify({p_usuario_id:uid,p_limite:2000})}).then(function(rows){
+      var remote=(rows||[]).map(function(r){var alts=r.alternativas;if(typeof alts==='string'){try{alts=JSON.parse(alts);}catch(e){alts=[];}}return {id:String(r.id),cat:r.tema,q:r.enunciado,a:Array.isArray(alts)?alts:[],c:Number(r.resposta_correta),e:r.explicacao||'',remote:true,fonte:r.referencia||''};}).filter(function(q){return q.a.length===4&&q.c>=0&&q.c<4;});
+      questionBankOwner=uid;questionBankLoaded=true;claimedQuestionIds={};availableQuestionIds={};remote.forEach(function(q){availableQuestionIds[String(q.id)]=true;});
+      GAME_QUESTIONS=remote;
+      return GAME_QUESTIONS;
+    }).catch(function(){questionBankOwner=uid;questionBankLoaded=false;GAME_QUESTIONS=FALLBACK_QUESTIONS.slice();return GAME_QUESTIONS;});
   }
   function turnDeadline(){return new Date(Date.now()+36*60*60*1000).toISOString();}
 
   function initialState(firstTurn) {
     var q=pickQuestion([]);
-    return {version:2,turno:firstTurn,questao_id:q.id,usadas:[q.id],selos_1:[],selos_2:[],acertos_1:0,acertos_2:0,sequencia_1:0,sequencia_2:0,rodada:1,jogada:1,coroa_pendente:false,modo_coroa:false,prazo_turno:turnDeadline(),ultima_resposta:null};
+    if(!q)throw new Error('Nenhuma pergunta inédita disponível para este usuário.');
+    return {version:4,turno:firstTurn,questao_id:q.id,questao:q,usadas:[q.id],selos_1:[],selos_2:[],acertos_1:0,acertos_2:0,sequencia_1:0,sequencia_2:0,rodada:1,jogada:1,coroa_pendente:false,modo_coroa:false,prazo_turno:turnDeadline(),ultima_resposta:null};
   }
 
   function syncInviteNotifications() {
@@ -427,10 +446,10 @@
       method:'PATCH', headers:{'Prefer':'return=minimal'}, body:JSON.stringify({status:status, respondido_em:new Date().toISOString()})
     }).then(function () {
       if (!accept) return null;
-      return api('/rest/v1/avalix_partidas', {
+      return loadQuestionBank(inviteRow.remetente_id).then(function(){return api('/rest/v1/avalix_partidas', {
         method:'POST', headers:{'Prefer':'return=representation'},
         body:JSON.stringify({ jogador_1_id:inviteRow.remetente_id, jogador_1_nome:inviteRow.remetente_nome, jogador_2_id:inviteRow.convidado_id, jogador_2_nome:inviteRow.convidado_nome, turno_id:inviteRow.remetente_id, status:'ativa', estado:initialState(inviteRow.remetente_id), atualizado_em:new Date().toISOString() })
-      });
+      });});
     }).then(function (match) {
       window.showToast && showToast(accept ? 'Convite aceito. A partida foi criada.' : 'Convite recusado.', accept ? 'success' : 'warning');
       return Promise.all([loadInvites(),loadMatches()]).then(function () { if (accept && match && match[0]) renderMatch(match[0]); });
@@ -606,7 +625,7 @@
     var icons=['ti-bone','ti-run','ti-bandage','ti-brain','ti-heartbeat','ti-users-group','ti-building-hospital','ti-ball-football'];
     container.innerHTML='<style>'+styles+gameStyles+'</style><div class="fg-play"><section class="fg-crown-choice"><i class="ti ti-crown"></i><span>OPORTUNIDADE DE COROA</span><h2>Escolha uma área para conquistar</h2><p>Responda corretamente à próxima pergunta para ganhar o personagem dessa área.</p><div>'+GAME_CATEGORIES.map(function(c,i){var owned=seals.indexOf(c.id)>=0;return '<button data-crown-cat="'+c.id+'" style="--cat:'+c.color+'" '+(owned?'disabled':'')+'>'+categoryMascot(c,'fg-crown-mascot')+'<i class="ti '+(owned?'ti-check':'')+'"></i><b>'+esc(c.name)+'</b><small>'+(owned?'Já conquistada':'Escolher área')+'</small></button>';}).join('')+'</div></section></div>';
     container.querySelectorAll('[data-crown-cat]').forEach(function(btn){btn.onclick=function(){
-      var cat=btn.dataset.crownCat,q=pickQuestionByCategory(cat,state.usadas||[]);state.questao_id=q.id;state.usadas=(state.usadas||[]).concat([q.id]);state.coroa_pendente=false;state.modo_coroa=true;state.categoria_coroa=cat;
+      var cat=btn.dataset.crownCat,q=pickQuestionByCategory(cat,state.usadas||[]);if(!q){window.showToast&&showToast('Não há pergunta inédita disponível nesta área no momento.','warning');return;}state.questao_id=q.id;state.questao=q;state.usadas=(state.usadas||[]).concat([q.id]);state.coroa_pendente=false;state.modo_coroa=true;state.categoria_coroa=cat;
       api('/rest/v1/avalix_partidas?id=eq.'+encodeURIComponent(match.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({estado:state,atualizado_em:new Date().toISOString()})}).then(function(){match.estado=state;sessionStorage.setItem('fg-wheel-'+match.id+'-'+(state.jogada||1),'1');renderMatch(match);});
     };});
   }
@@ -615,13 +634,28 @@
     setMusicMode('match');
     var container = document.getElementById('viewContent');
     if (!container) return;
-    var s=current(), state=typeof match.estado==='string'?JSON.parse(match.estado):match.estado||{}, q=GAME_QUESTIONS.find(function(x){return x.id===state.questao_id;})||pickQuestion(state.usadas), mine=match.jogador_1_id===s.id, mySeals=mine?(state.selos_1||[]):(state.selos_2||[]), otherSeals=mine?(state.selos_2||[]):(state.selos_1||[]), mySequence=mine?(state.sequencia_1||0):(state.sequencia_2||0), myTurn=match.turno_id===s.id, otherName=mine?match.jogador_2_nome:match.jogador_1_nome, otherId=mine?match.jogador_2_id:match.jogador_1_id, category=GAME_CATEGORIES.find(function(c){return c.id===q.cat;})||GAME_CATEGORIES[0];
+    var s=current(), state=typeof match.estado==='string'?JSON.parse(match.estado):match.estado||{},mine=String(match.jogador_1_id)===String(s.id),myTurn=String(match.turno_id)===String(s.id);
+    if(myTurn&&String(questionBankOwner)!==String(s.id)){
+      loadQuestionBank(s.id).then(function(){
+        var saved=state.questao||null,available=saved&&saved.remote&&GAME_QUESTIONS.some(function(item){return String(item.id)===String(saved.id);});
+        if(!available){var replacement=pickQuestion(state.usadas||[]);if(replacement){state.questao_id=replacement.id;state.questao=replacement;state.usadas=(state.usadas||[]).concat([replacement.id]);match.estado=state;return api('/rest/v1/avalix_partidas?id=eq.'+encodeURIComponent(match.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({estado:state,atualizado_em:new Date().toISOString()})});}}
+      }).then(function(){renderMatch(match);}).catch(function(){renderMatch(match);});return;
+    }
+    var savedForTurn=state.questao||null,usageKey=String(s.id)+'__'+String(state.questao_id||'');
+    if(myTurn&&questionBankLoaded&&(!savedForTurn||!savedForTurn.remote||(!availableQuestionIds[String(savedForTurn.id)]&&!reportedQuestionIds[usageKey]))){
+      var unseenReplacement=pickQuestion(state.usadas||[]);
+      if(unseenReplacement){state.questao_id=unseenReplacement.id;state.questao=unseenReplacement;state.usadas=(state.usadas||[]).concat([unseenReplacement.id]);match.estado=state;api('/rest/v1/avalix_partidas?id=eq.'+encodeURIComponent(match.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({estado:state,atualizado_em:new Date().toISOString()})}).then(function(){renderMatch(match);});return;}
+    }
+    var q=(state.questao&&String(state.questao.id)===String(state.questao_id)?state.questao:null)||GAME_QUESTIONS.find(function(x){return String(x.id)===String(state.questao_id);})||pickQuestion(state.usadas);
+    if(!q){container.innerHTML='<div class="card card-pad"><b>Banco de perguntas em reposição</b><p style="margin:6px 0 0;color:var(--ac-charcoal-soft)">Não há pergunta inédita disponível para este usuário agora. O jogo continuará quando a reposição automática concluir.</p></div>';return;}
+    if(myTurn)reserveQuestion(q,match.id,s.id);
+    var mySeals=mine?(state.selos_1||[]):(state.selos_2||[]), otherSeals=mine?(state.selos_2||[]):(state.selos_1||[]), mySequence=mine?(state.sequencia_1||0):(state.sequencia_2||0), otherName=mine?match.jogador_2_nome:match.jogador_1_nome, otherId=mine?match.jogador_2_id:match.jogador_1_id, category=GAME_CATEGORIES.find(function(c){return c.id===q.cat;})||GAME_CATEGORIES[0];
     var facts=worldFacts(),firstFact=nextWorldFact(facts);
     var deadline=state.prazo_turno?new Date(state.prazo_turno).getTime():new Date(match.atualizado_em||Date.now()).getTime()+36*60*60*1000;
     if(Date.now()>deadline){
       var expiredId=match.turno_id,newTurn=String(expiredId)===String(match.jogador_1_id)?match.jogador_2_id:match.jogador_1_id,nqExpired=pickQuestion(state.usadas||[]);
       if(String(expiredId)===String(match.jogador_1_id))state.sequencia_1=0;else state.sequencia_2=0;
-      state.coroa_pendente=false;state.modo_coroa=false;state.categoria_coroa=null;state.rodada=(state.rodada||1)+1;state.jogada=(state.jogada||1)+1;state.questao_id=nqExpired.id;state.usadas=(state.usadas||[]).concat([nqExpired.id]);state.prazo_turno=turnDeadline();state.ultima_resposta={por:expiredId,correta:false,tempo_turno_esgotado:true,em:new Date().toISOString()};
+      if(!nqExpired){container.innerHTML='<div class="card card-pad"><b>Banco de perguntas em reposição</b></div>';return;}state.coroa_pendente=false;state.modo_coroa=false;state.categoria_coroa=null;state.rodada=(state.rodada||1)+1;state.jogada=(state.jogada||1)+1;state.questao_id=nqExpired.id;state.questao=nqExpired;state.usadas=(state.usadas||[]).concat([nqExpired.id]);state.prazo_turno=turnDeadline();state.ultima_resposta={por:expiredId,correta:false,tempo_turno_esgotado:true,em:new Date().toISOString()};
       api('/rest/v1/avalix_partidas?id=eq.'+encodeURIComponent(match.id),{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({estado:state,turno_id:newTurn,atualizado_em:new Date().toISOString()})}).then(function(){match.estado=state;match.turno_id=newTurn;window.showToast&&showToast(String(expiredId)===String(s.id)?'Seu prazo de 36 horas terminou. A vez passou.':'O prazo do adversário terminou. Agora é sua vez.','warning');renderMatch(match);});return;
     }
     if(myTurn&&state.coroa_pendente){renderCrownChoice(match,state);return;}
@@ -682,7 +716,8 @@
     if(currentWon){winnerId=s.id;winnerName=s.nome;}
     else if(limitReached){var myCount=seals.length,otherCount=otherSeals.length;if(myCount!==otherCount){winnerId=myCount>otherCount?s.id:(p1?match.jogador_2_id:match.jogador_1_id);winnerName=String(winnerId)===String(match.jogador_1_id)?match.jogador_1_nome:match.jogador_2_nome;}else{state.rodada=25;state.desempate=true;}}
     var finished=!!winnerId,wonForCurrent=finished&&String(winnerId)===String(s.id),next=correct?s.id:(p1?match.jogador_2_id:match.jogador_1_id),nq=pickQuestion(state.usadas||[]);
-    state.usadas=(state.usadas||[]).concat([nq.id]);state.questao_id=nq.id;state.jogada=(state.jogada||1)+1;state.prazo_turno=correct?(state.prazo_turno||turnDeadline()):turnDeadline();state.ultima_resposta={por:s.id,correta:correct,questao:q.id,tempo_esgotado:answer<0,em:new Date().toISOString()};
+    if(!finished&&!nq){window.showToast&&showToast('A reposição de perguntas inéditas ainda está em andamento.','warning');return;}
+    if(nq){state.usadas=(state.usadas||[]).concat([nq.id]);state.questao_id=nq.id;state.questao=nq;}state.jogada=(state.jogada||1)+1;state.prazo_turno=correct?(state.prazo_turno||turnDeadline()):turnDeadline();state.ultima_resposta={por:s.id,correta:correct,questao:q.id,tempo_esgotado:answer<0,em:new Date().toISOString()};
     if(finished){state.vencedor_id=winnerId;state.vencedor_nome=winnerName;state.finalizada_em=new Date().toISOString();}
     var opponentId=match.jogador_1_id===current().id?match.jogador_2_id:match.jogador_1_id;
     var note=container.querySelector('#fgAnswerNote');
@@ -767,7 +802,7 @@
     if (running || !allowed()) return;
     running = true;
     if(!document.documentElement.dataset.fgAudioBound){document.documentElement.dataset.fgAudioBound='1';var resumeGameAudio=function(e){if(!running||!audioActive)return;unlockAudio();var now=Date.now(),fresh=now-(audioState.lastGesture||0)>250;audioState.lastGesture=now;if(fresh&&e&&e.target&&e.target.closest&&e.target.closest('button')&&!e.target.closest('#fgSoundDock'))sound('click');};document.addEventListener('pointerdown',resumeGameAudio,{passive:true});document.addEventListener('touchend',resumeGameAudio,{passive:true});document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'&&running&&audioActive)unlockAudio();else if(document.visibilityState==='hidden')stopMusic();});window.addEventListener('pageshow',function(){if(running&&audioActive)unlockAudio();});}
-    heartbeat(false); loadPresence(); loadInvites(); loadMatches(); loadChatNotifications(); loadGameProfile(); loadRanking(); loadCommunityProfiles();
+    heartbeat(false); loadPresence(); loadInvites(); loadMatches(); loadChatNotifications(); loadGameProfile(); loadRanking(); loadCommunityProfiles(); loadQuestionBank(current().id);
     timers.push(setInterval(function () { heartbeat(false); }, 20000));
     timers.push(setInterval(loadPresence, 8000));
     timers.push(setInterval(loadInvites, 6000));
