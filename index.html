@@ -5239,6 +5239,39 @@ function pacientes_doAluno(alunoId) {
 function paciente_normalizarIdade(valor) {
   return String(valor == null ? '' : valor).replace(/[^0-9]/g, '');
 }
+function paciente_normalizarDataNascimento(valor) {
+  const v = String(valor || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return '';
+  const partes = v.split('-').map(Number);
+  const d = new Date(Date.UTC(partes[0], partes[1] - 1, partes[2]));
+  if (d.getUTCFullYear() !== partes[0] || d.getUTCMonth() !== partes[1] - 1 || d.getUTCDate() !== partes[2]) return '';
+  return v;
+}
+function paciente_hojeIso() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function paciente_calcularIdade(dataNascimento) {
+  const dn = paciente_normalizarDataNascimento(dataNascimento);
+  if (!dn) return null;
+  const p = dn.split('-').map(Number);
+  const agora = new Date();
+  const hojeUtc = Date.UTC(agora.getFullYear(), agora.getMonth(), agora.getDate());
+  const nascUtc = Date.UTC(p[0], p[1] - 1, p[2]);
+  if (nascUtc > hojeUtc) return null;
+  let anos = agora.getFullYear() - p[0];
+  let aniversarioUtc = Date.UTC(p[0] + anos, p[1] - 1, p[2]);
+  if (aniversarioUtc > hojeUtc) {
+    anos--;
+    aniversarioUtc = Date.UTC(p[0] + anos, p[1] - 1, p[2]);
+  }
+  return { anos };
+}
+function paciente_idadeTexto(paciente) {
+  const idade = paciente_calcularIdade(paciente && paciente.dataNascimento);
+  if (idade) return idade.anos + (idade.anos === 1 ? ' ano' : ' anos');
+  return paciente && paciente.idade ? String(paciente.idade) + ' anos' : '—';
+}
 function paciente_normalizarSexo(valor) {
   const v = String(valor || '').trim();
   return (v === 'Masculino' || v === 'Feminino') ? v : '';
@@ -5249,12 +5282,17 @@ function paciente_create(alunoId, dados) {
   if (!Array.isArray(db.pacientes)) db.pacientes = [];
   const nome = (dados.nome || '').trim();
   if (!nome) return { ok: false, msg: 'Informe o nome do paciente.' };
+  const dataNascimento = paciente_normalizarDataNascimento(dados.dataNascimento);
+  if (!dataNascimento) return { ok: false, msg: 'Informe uma data de nascimento válida.' };
+  const idadeCalculada = paciente_calcularIdade(dataNascimento);
+  if (!idadeCalculada) return { ok: false, msg: 'A data de nascimento não pode estar no futuro.' };
   const agora = new Date().toISOString();
   const paciente = {
     id: uid('paciente'),
     alunoId,
     nome,
-    idade: paciente_normalizarIdade(dados.idade),
+    dataNascimento,
+    idade: String(idadeCalculada.anos),
     sexo: paciente_normalizarSexo(dados.sexo),
     criadoEm: agora,
     atualizadoEm: agora
@@ -5270,8 +5308,13 @@ function paciente_update(id, dados) {
   if (!paciente) return { ok: false, msg: 'Paciente não encontrado.' };
   const nome = (dados.nome || '').trim();
   if (!nome) return { ok: false, msg: 'Informe o nome do paciente.' };
+  const dataNascimento = paciente_normalizarDataNascimento(dados.dataNascimento);
+  if (!dataNascimento) return { ok: false, msg: 'Informe uma data de nascimento válida.' };
+  const idadeCalculada = paciente_calcularIdade(dataNascimento);
+  if (!idadeCalculada) return { ok: false, msg: 'A data de nascimento não pode estar no futuro.' };
   paciente.nome = nome;
-  paciente.idade = paciente_normalizarIdade(dados.idade);
+  paciente.dataNascimento = dataNascimento;
+  paciente.idade = String(idadeCalculada.anos);
   paciente.sexo = paciente_normalizarSexo(dados.sexo);
   paciente.atualizadoEm = new Date().toISOString();
   // Atualiza imediatamente as fichas ainda em rascunho deste paciente.
@@ -5332,6 +5375,9 @@ function fichaSubtopico_campoPaciente(titulo) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   if (t === 'nome do paciente' || t === 'nome paciente' || t === 'paciente') return 'nome';
   if (t === 'idade' || t === 'idade do paciente' || t === 'idade paciente') return 'idade';
+  if (t === 'idade (anos)' || t === 'idade em anos') return 'idadeAnos';
+  if (t === 'data de nascimento' || t === 'data nascimento' || t === 'nascimento' ||
+      t === 'dn' || t === 'dn (data de nascimento)') return 'dataNascimento';
   if (t === 'sexo' || t === 'sexo do paciente' || t === 'sexo paciente' ||
       t === 'genero' || t === 'genero do paciente') return 'sexo';
   return null;
@@ -5350,7 +5396,12 @@ function fichaClinica_aplicarDadosPaciente(dados, modelo, paciente) {
   if (!dados || !modelo || !paciente) return dados;
   (modelo.topicos || []).forEach(t => (t.subtopicos || []).forEach(s => {
     const campo = fichaSubtopico_campoPaciente(s.titulo);
-    if (campo) dados[s.id] = String(paciente[campo] == null ? '' : paciente[campo]);
+    if (!campo) return;
+    const idade = paciente_calcularIdade(paciente.dataNascimento);
+    let valor = paciente[campo];
+    if (campo === 'idade') valor = s.tipo === 'numero' && idade ? idade.anos : paciente_idadeTexto(paciente);
+    if (campo === 'idadeAnos') valor = idade ? idade.anos : (paciente.idade || '');
+    dados[s.id] = String(valor == null ? '' : valor);
   }));
   return dados;
 }
@@ -5441,7 +5492,10 @@ function fichaClinica_obrigatoriosPendentes(ficha) {
       if (!s.obrigatorio) return;
       const campoPaciente = fichaSubtopico_campoPaciente(s.titulo);
       if (campoPaciente) {
-        if (!paciente || !String(paciente[campoPaciente] || '').trim()) pendentes.push(s.titulo);
+        const idade = paciente && paciente_calcularIdade(paciente.dataNascimento);
+        let preenchido = paciente && paciente[campoPaciente] != null && String(paciente[campoPaciente]).trim();
+        if (campoPaciente === 'idade' || campoPaciente === 'idadeAnos') preenchido = !!(idade || (paciente && paciente.idade));
+        if (!preenchido) pendentes.push(s.titulo);
         return;
       }
       if (!(ficha.dados[s.id] || '').toString().trim()) pendentes.push(s.titulo);
@@ -12036,7 +12090,8 @@ function pode(acao) {
   function infoPacienteLinha(p) {
     if (!p) return '';
     const partes = [];
-    if (p.idade) partes.push(escapeHtml(p.idade) + ' anos');
+    if (p.dataNascimento) partes.push('Nascimento: ' + escapeHtml(fmtDataCampo(p.dataNascimento)));
+    if (p.dataNascimento || p.idade) partes.push(escapeHtml(paciente_idadeTexto(p)));
     if (p.sexo) partes.push(escapeHtml(p.sexo));
     return partes.join(' · ');
   }
@@ -12111,7 +12166,9 @@ function pode(acao) {
           <div class="meta-item"><span class="meta-label">Aluno(a)</span><span class="meta-value">${escapeHtml(aluno ? aluno.nome : 'Aluno(a) removido(a)')}</span></div>
           <div class="meta-item"><span class="meta-label">Matrícula</span><span class="meta-value">${escapeHtml(aluno ? aluno.matricula : '—')}</span></div>
           <div class="meta-item"><span class="meta-label">Paciente</span><span class="meta-value">${escapeHtml(paciente ? paciente.nome : '—')}${numero ? ' (Ficha #' + numero + ')' : ''}</span></div>
-          <div class="meta-item"><span class="meta-label">Idade / Sexo</span><span class="meta-value">${paciente && paciente.idade ? escapeHtml(paciente.idade) : '—'} / ${paciente && paciente.sexo ? escapeHtml(paciente.sexo) : '—'}</span></div>
+          <div class="meta-item"><span class="meta-label">Data de nascimento</span><span class="meta-value">${paciente && paciente.dataNascimento ? escapeHtml(fmtDataCampo(paciente.dataNascimento)) : '—'}</span></div>
+          <div class="meta-item"><span class="meta-label">Idade atual</span><span class="meta-value">${escapeHtml(paciente_idadeTexto(paciente))}</span></div>
+          <div class="meta-item"><span class="meta-label">Sexo</span><span class="meta-value">${paciente && paciente.sexo ? escapeHtml(paciente.sexo) : '—'}</span></div>
           <div class="meta-item"><span class="meta-label">Ficha criada em</span><span class="meta-value">${fmtDataHora(ficha.criadoEm)}</span></div>
           <div class="meta-item"><span class="meta-label">Ficha integrada em</span><span class="meta-value">${fmtDataHora(ficha.integradoEm)}</span></div>
         </div>
@@ -12399,8 +12456,9 @@ function pode(acao) {
           </div>
           <div class="field-row">
             <div class="field">
-              <label>Idade</label>
-              <input type="number" min="0" step="1" id="pacIdadeInput" value="${escapeHtml(pacienteExistente ? pacienteExistente.idade : '')}">
+              <label>Data de nascimento</label>
+              <input type="date" id="pacDataNascimentoInput" max="${paciente_hojeIso()}" value="${escapeHtml(pacienteExistente ? (pacienteExistente.dataNascimento || '') : '')}" required>
+              <small id="pacIdadeCalculada" style="display:block;margin-top:5px;color:var(--ac-charcoal-soft);"></small>
             </div>
             <div class="field">
               <label>Sexo</label>
@@ -12419,12 +12477,22 @@ function pode(acao) {
       </div>
     `;
     function close() { overlay.remove(); }
+    const inputNascimento = overlay.querySelector('#pacDataNascimentoInput');
+    const idadeCalculadaEl = overlay.querySelector('#pacIdadeCalculada');
+    function atualizarIdadeCalculada() {
+      const idade = paciente_calcularIdade(inputNascimento.value);
+      idadeCalculadaEl.textContent = idade
+        ? 'Idade hoje: ' + idade.anos + (idade.anos === 1 ? ' ano' : ' anos')
+        : '';
+    }
+    inputNascimento.addEventListener('input', atualizarIdadeCalculada);
+    atualizarIdadeCalculada();
     overlay.querySelector('.modal-close').addEventListener('click', close);
     overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
     overlay.querySelector('[data-act="confirm"]').addEventListener('click', () => {
       const dados = {
         nome: overlay.querySelector('#pacNomeInput').value,
-        idade: overlay.querySelector('#pacIdadeInput').value,
+        dataNascimento: inputNascimento.value,
         sexo: overlay.querySelector('#pacSexoInput').value
       };
       const sess = session_get();
@@ -12733,7 +12801,8 @@ function pode(acao) {
             <div style="font-weight:700;font-size:13.5px;margin-bottom:5px;">Dados do paciente preenchidos automaticamente</div>
             <div style="font-size:13px;color:var(--ac-charcoal-soft);line-height:1.55;">
               <strong>Nome:</strong> ${escapeHtml(paciente ? paciente.nome : '—')}
-              &nbsp;•&nbsp; <strong>Idade:</strong> ${escapeHtml(paciente && paciente.idade ? paciente.idade : '—')}
+              &nbsp;•&nbsp; <strong>Nascimento:</strong> ${paciente && paciente.dataNascimento ? escapeHtml(fmtDataCampo(paciente.dataNascimento)) : '—'}
+              &nbsp;•&nbsp; <strong>Idade:</strong> ${escapeHtml(paciente_idadeTexto(paciente))}
               &nbsp;•&nbsp; <strong>Sexo:</strong> ${escapeHtml(paciente && paciente.sexo ? paciente.sexo : '—')}
             </div>
             <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:4px;">Para corrigir estes dados, edite o cadastro do paciente.</div>
