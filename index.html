@@ -5274,6 +5274,14 @@ function paciente_update(id, dados) {
   paciente.idade = paciente_normalizarIdade(dados.idade);
   paciente.sexo = paciente_normalizarSexo(dados.sexo);
   paciente.atualizadoEm = new Date().toISOString();
+  // Atualiza imediatamente as fichas ainda em rascunho deste paciente.
+  // Fichas já integradas permanecem preservadas como documento final.
+  (db.fichasClinicas || []).forEach(ficha => {
+    if (ficha.pacienteId !== paciente.id || ficha.status !== 'rascunho') return;
+    const modelo = (db.fichaModelos || []).find(m => m.id === ficha.modeloId);
+    fichaClinica_aplicarDadosPaciente(ficha.dados, modelo, paciente);
+    ficha.atualizadoEm = paciente.atualizadoEm;
+  });
   db_save(db);
   return { ok: true, paciente };
 }
@@ -5314,14 +5322,37 @@ function paciente_delete(id) {
 
 /* ══ Fichas clínicas (lançadas pelo aluno, por paciente + modelo) ══ */
 
-/* Detecta subtópicos que só duplicam o nome do paciente (já cadastrado
-   em "Cadastro de pacientes") — esses campos não são mais mostrados
-   no formulário nem no PDF; o valor é sempre puxado automaticamente
-   do cadastro do paciente. */
-function fichaSubtopico_ehNomePaciente(titulo) {
+/* Identifica os campos cadastrais do paciente que alguns modelos de
+   ficha também possuem. Nome, idade e sexo vêm do cadastro do paciente:
+   o aluno não precisa digitá-los novamente em cada ficha. A comparação
+   é propositalmente restrita para não confundir, por exemplo, "idade
+   gestacional" com a idade cadastral. */
+function fichaSubtopico_campoPaciente(titulo) {
   const t = String(titulo || '').trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  return t === 'nome do paciente' || t === 'nome paciente' || t === 'paciente';
+  if (t === 'nome do paciente' || t === 'nome paciente' || t === 'paciente') return 'nome';
+  if (t === 'idade' || t === 'idade do paciente' || t === 'idade paciente') return 'idade';
+  if (t === 'sexo' || t === 'sexo do paciente' || t === 'sexo paciente' ||
+      t === 'genero' || t === 'genero do paciente') return 'sexo';
+  return null;
+}
+
+function fichaSubtopico_ehDadoPaciente(titulo) {
+  return !!fichaSubtopico_campoPaciente(titulo);
+}
+
+/* Mantém a estrutura antiga disponível para trechos legados. */
+function fichaSubtopico_ehNomePaciente(titulo) {
+  return fichaSubtopico_campoPaciente(titulo) === 'nome';
+}
+
+function fichaClinica_aplicarDadosPaciente(dados, modelo, paciente) {
+  if (!dados || !modelo || !paciente) return dados;
+  (modelo.topicos || []).forEach(t => (t.subtopicos || []).forEach(s => {
+    const campo = fichaSubtopico_campoPaciente(s.titulo);
+    if (campo) dados[s.id] = String(paciente[campo] == null ? '' : paciente[campo]);
+  }));
+  return dados;
 }
 
 function fichaClinica_dadosVaziosDoModelo(modelo) {
@@ -5359,13 +5390,8 @@ function fichaClinica_create(alunoId, pacienteId, modeloId) {
   if (!Array.isArray(db.fichasClinicas)) db.fichasClinicas = [];
   const agora = new Date().toISOString();
   const dados = fichaClinica_dadosVaziosDoModelo(modelo);
-  // Campos que só duplicam o nome do paciente já cadastrado são
-  // preenchidos automaticamente — o aluno não digita de novo.
-  if (paciente) {
-    (modelo.topicos || []).forEach(t => (t.subtopicos || []).forEach(s => {
-      if (fichaSubtopico_ehNomePaciente(s.titulo)) dados[s.id] = paciente.nome;
-    }));
-  }
+  // Nome, idade e sexo são copiados do cadastro do paciente.
+  fichaClinica_aplicarDadosPaciente(dados, modelo, paciente);
   const ficha = {
     id: uid('ficha_clin'),
     alunoId,
@@ -5391,15 +5417,11 @@ function fichaClinica_update(id, dadosParciais) {
   if (!ficha) return { ok: false, msg: 'Ficha não encontrada.' };
   if (ficha.status !== 'rascunho') return { ok: false, msg: 'Esta ficha já foi integrada e não pode mais ser editada.' };
   ficha.dados = Object.assign({}, ficha.dados, dadosParciais);
-  // Mantém sempre sincronizado com o cadastro do paciente (cobre
-  // fichas antigas e o caso de o paciente ter sido renomeado depois).
+  // Mantém nome, idade e sexo sincronizados com o cadastro do paciente
+  // (também cobre fichas antigas e alterações cadastrais posteriores).
   const modelo = fichaModelo_get(ficha.modeloId);
   const paciente = paciente_get(ficha.pacienteId);
-  if (modelo && paciente) {
-    (modelo.topicos || []).forEach(t => (t.subtopicos || []).forEach(s => {
-      if (fichaSubtopico_ehNomePaciente(s.titulo)) ficha.dados[s.id] = paciente.nome;
-    }));
-  }
+  fichaClinica_aplicarDadosPaciente(ficha.dados, modelo, paciente);
   ficha.atualizadoEm = new Date().toISOString();
   db_save(db);
   return { ok: true, ficha };
@@ -5417,8 +5439,9 @@ function fichaClinica_obrigatoriosPendentes(ficha) {
   (modelo.topicos || []).forEach(t => {
     (t.subtopicos || []).forEach(s => {
       if (!s.obrigatorio) return;
-      if (fichaSubtopico_ehNomePaciente(s.titulo)) {
-        if (!paciente || !(paciente.nome || '').trim()) pendentes.push(s.titulo);
+      const campoPaciente = fichaSubtopico_campoPaciente(s.titulo);
+      if (campoPaciente) {
+        if (!paciente || !String(paciente[campoPaciente] || '').trim()) pendentes.push(s.titulo);
         return;
       }
       if (!(ficha.dados[s.id] || '').toString().trim()) pendentes.push(s.titulo);
@@ -5472,6 +5495,13 @@ function fichaClinica_integrar(id, dadosParciais) {
     ficha.dados = Object.assign({}, ficha.dados || {}, dadosParciais);
     ficha.atualizadoEm = new Date().toISOString();
   }
+  // Também sincroniza ao integrar diretamente, sem exigir que o aluno
+  // clique antes em Salvar.
+  fichaClinica_aplicarDadosPaciente(
+    ficha.dados,
+    fichaModelo_get(ficha.modeloId),
+    paciente_get(ficha.pacienteId)
+  );
   const pendentes = fichaClinica_obrigatoriosPendentes(ficha);
   if (pendentes.length) {
     return { ok: false, msg: 'Preencha os campos obrigatórios antes de integrar: ' + pendentes.join(', ') + '.' };
@@ -12087,7 +12117,7 @@ function pode(acao) {
         </div>
 
         ${(modelo ? modelo.topicos : []).map(t => {
-          const subs = (t.subtopicos || []).filter(s => !fichaSubtopico_ehNomePaciente(s.titulo));
+          const subs = (t.subtopicos || []).filter(s => !fichaSubtopico_ehDadoPaciente(s.titulo));
           if (!subs.length) return '';
           return `
           <div class="report-clin-secao">
@@ -12696,6 +12726,21 @@ function pode(acao) {
         </div>
       </div>
 
+      <div class="card card-pad" style="margin-bottom:1.25rem;background:#EFF6FF;border-color:#BFDBFE;">
+        <div style="display:flex;align-items:flex-start;gap:.75rem;">
+          <i class="ti ti-user-check" style="font-size:21px;color:#2563EB;flex-shrink:0;margin-top:1px;"></i>
+          <div style="min-width:0;">
+            <div style="font-weight:700;font-size:13.5px;margin-bottom:5px;">Dados do paciente preenchidos automaticamente</div>
+            <div style="font-size:13px;color:var(--ac-charcoal-soft);line-height:1.55;">
+              <strong>Nome:</strong> ${escapeHtml(paciente ? paciente.nome : '—')}
+              &nbsp;•&nbsp; <strong>Idade:</strong> ${escapeHtml(paciente && paciente.idade ? paciente.idade : '—')}
+              &nbsp;•&nbsp; <strong>Sexo:</strong> ${escapeHtml(paciente && paciente.sexo ? paciente.sexo : '—')}
+            </div>
+            <div style="font-size:11.5px;color:var(--ac-charcoal-soft);margin-top:4px;">Para corrigir estes dados, edite o cadastro do paciente.</div>
+          </div>
+        </div>
+      </div>
+
       <div class="card card-pad" style="margin-bottom:1.25rem;background:var(--ac-warning-bg);border-color:var(--ac-warning);">
         <div style="display:flex;gap:.6rem;align-items:flex-start;">
           <i class="ti ti-info-circle" style="color:var(--ac-warning);font-size:18px;flex-shrink:0;margin-top:1px;"></i>
@@ -12708,7 +12753,7 @@ function pode(acao) {
       <div class="card card-pad" id="fichaClinFormCard">
         <h2 style="margin:0 0 1.2rem;font-size:16px;">${escapeHtml(modelo ? modelo.titulo : 'Ficha')}</h2>
         ${(modelo ? modelo.topicos : []).map(t => {
-          const subs = (t.subtopicos || []).filter(s => !fichaSubtopico_ehNomePaciente(s.titulo));
+          const subs = (t.subtopicos || []).filter(s => !fichaSubtopico_ehDadoPaciente(s.titulo));
           if (!subs.length) return '';
           return `
           <div style="margin-bottom:1.6rem;">
