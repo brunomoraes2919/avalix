@@ -1709,14 +1709,24 @@ function _supaFetch(path, opts) {
     'apikey': _supa.key,
     'Content-Type': 'application/json'
   };
-  return fetch(_supa.url + path, Object.assign({ headers: headers }, opts || {}));
+  return fetch(_supa.url + path, Object.assign({
+    headers: headers,
+    signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(12000) : undefined
+  }, opts || {}));
 }
 
 function _supaFetchDadosRemotos() {
   return _supaFetch('/rest/v1/avaliaclin_dados?id=eq.principal&select=dados,atualizado_em', { cache: 'no-store' })
-    .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (rows) { return (rows && rows[0]) ? rows[0] : null; })
-    .catch(function () { return null; });
+    .then(function (r) {
+      if (!r.ok) throw new Error('Falha na leitura do banco: HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function (rows) {
+      if (!Array.isArray(rows) || (rows.length && (!rows[0]?.dados || !rows[0]?.atualizado_em))) {
+        throw new Error('Resposta inesperada ao sincronizar o banco.');
+      }
+      return rows[0] || null;
+    });
 }
 
 /* Une duas listas pelo campo "id": tudo que existe só de um lado é
@@ -2007,7 +2017,7 @@ function _supaBootstrap() {
     setTimeout(terminar, 6000);
 
     _supaFetchDadosRemotos().then(function (row) {
-      if (row && row.dados) {
+      if (!acabou && row && row.dados) {
         try {
           localStorage.setItem(DB_KEY, JSON.stringify(row.dados));
           _supaLastTs = row.atualizado_em;
@@ -2021,12 +2031,10 @@ function _supaBootstrap() {
 /* Puxa dados do Supabase → localStorage, mesclando com o que já
    existe localmente. Chamado 1x no boot. */
 function _supaPull() {
-  var raw = localStorage.getItem(DB_KEY);
-  var local = null;
-  try { local = raw ? JSON.parse(raw) : null; } catch (e) { local = null; }
-
   _supaFetchDadosRemotos().then(function (row) {
     if (row && row.dados) {
+      var raw = localStorage.getItem(DB_KEY);
+      var local = raw ? JSON.parse(raw) : null;
       var mesclado = local ? _supaMergeDados(local, row.dados, 'remoto') : row.dados;
       localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
       _supaLastTs = row.atualizado_em;
@@ -2037,7 +2045,7 @@ function _supaPull() {
        offline (ou a própria mesclagem, se ela mudou algo) chegue ao
        Supabase mesmo que o usuário não edite nada nesta sessão. */
     _supaSchedule();
-  });
+  }).catch(function () { _supaSchedule(); });
 }
 
 /* Versão da pull que devolve uma Promise e nunca demora mais que
@@ -2052,12 +2060,10 @@ function _supaPullAguardando(timeoutMs) {
     var acabar = function () { if (!resolvido) { resolvido = true; resolve(); } };
     setTimeout(acabar, timeoutMs);
 
-    var raw = localStorage.getItem(DB_KEY);
-    var local = null;
-    try { local = raw ? JSON.parse(raw) : null; } catch (e) { local = null; }
-
     _supaFetchDadosRemotos().then(function (row) {
-      if (row && row.dados) {
+      if (!resolvido && row && row.dados) {
+        var raw = localStorage.getItem(DB_KEY);
+        var local = raw ? JSON.parse(raw) : null;
         var mesclado = local ? _supaMergeDados(local, row.dados, 'remoto') : row.dados;
         localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
         _supaLastTs = row.atualizado_em;
@@ -2083,7 +2089,7 @@ function _supaPushComTentativas(tentativasRestantes) {
   var local;
   try { local = JSON.parse(raw); } catch (e) { return; }
 
-  _supaFetchDadosRemotos().then(function (row) {
+  return _supaFetchDadosRemotos().then(function (row) {
     var latestRaw = localStorage.getItem(DB_KEY);
     try { if (latestRaw) local = JSON.parse(latestRaw); } catch (e) {}
     var mesclado = (row && row.dados) ? _supaMergeDados(local, row.dados, 'local') : local;
@@ -2099,7 +2105,7 @@ function _supaPushComTentativas(tentativasRestantes) {
           'Authorization': 'Bearer ' + _supa.key,
           'apikey': _supa.key,
           'Content-Type': 'application/json',
-          'Prefer': 'resolution=merge-duplicates,return=representation'
+          'Prefer': 'resolution=ignore-duplicates,return=representation'
         },
         body: JSON.stringify({ id: 'principal', dados: mesclado, atualizado_em: agora })
       });
@@ -2126,13 +2132,30 @@ function _supaPushComTentativas(tentativasRestantes) {
       }
       /* 0 linhas afetadas = alguém gravou entre minha leitura e minha
          escrita — busca a versão mais nova, mescla e tenta de novo. */
-      if (tentativasRestantes > 0) _supaPushComTentativas(tentativasRestantes - 1);
-    })
-    .catch(function() {});
+      if (tentativasRestantes > 0) return _supaPushComTentativas(tentativasRestantes - 1);
+      throw new Error('Não foi possível confirmar a sincronização.');
+    });
 }
 
+var _supaPushEmCurso = false;
+var _supaPushPendente = false;
 function _supaPush() {
-  _supaPushComTentativas(4);
+  if (_supaPushEmCurso) {
+    _supaPushPendente = true;
+    return;
+  }
+  _supaPushEmCurso = true;
+  Promise.resolve().then(function () { return _supaPushComTentativas(4); })
+    .catch(function () {
+      clearTimeout(_supa.timer);
+      _supa.timer = setTimeout(_supaPush, 15000);
+    }).finally(function () {
+      _supaPushEmCurso = false;
+      if (_supaPushPendente) {
+        _supaPushPendente = false;
+        _supaSchedule();
+      }
+    });
 }
 
 function _supaSchedule() {
@@ -2146,6 +2169,7 @@ var _supaMyPush = 0;      // quando EU fiz o último push (ms)
 
 function _supaStartPolling() {
   setInterval(_supaPollCheck, 5000);
+  window.addEventListener('online', _supaSchedule);
 }
 
 function _supaPollCheck() {
@@ -2158,14 +2182,14 @@ function _supaPollCheck() {
       if (!rows || !rows[0] || !rows[0].atualizado_em) return;
       var remoteTs = rows[0].atualizado_em;
       if (_supaLastTs && remoteTs === _supaLastTs) return; // nada mudou
-      _supaLastTs = remoteTs;
-      _supaFetchDadosRemotos().then(function (row) {
+      return _supaFetchDadosRemotos().then(function (row) {
         if (!row || !row.dados) return;
         var raw = localStorage.getItem(DB_KEY);
         var local = null;
         try { local = raw ? JSON.parse(raw) : null; } catch (e) { local = null; }
         var mesclado = local ? _supaMergeDados(local, row.dados, 'remoto') : row.dados;
         localStorage.setItem(DB_KEY, JSON.stringify(mesclado));
+        _supaLastTs = row.atualizado_em;
         /* Os dados remotos ja foram mesclados no armazenamento. Nao
            redesenhar automaticamente a tela ativa: recriar a view pode
            fechar fichas, notas, modais, chats e formularios em andamento.
