@@ -5476,11 +5476,22 @@ function fichaClinica_create(alunoId, pacienteId, modeloId, fichaBaseId) {
   if (!Array.isArray(db.fichasClinicas)) db.fichasClinicas = [];
   const agora = new Date().toISOString();
   const dados = fichaClinica_dadosVaziosDoModelo(modelo);
+  const anteriores = db.fichasClinicas.filter(f => f.alunoId === alunoId &&
+    f.pacienteId === pacienteId && f.modeloId === modeloId);
   if (fichaBaseId) {
-    const base = db.fichasClinicas.find(f => f.id === fichaBaseId && f.alunoId === alunoId &&
-      f.pacienteId === pacienteId && f.modeloId === modeloId);
+    const base = anteriores.find(f => f.id === fichaBaseId);
     if (!base) return { ok: false, msg: 'Ficha anterior indisponível. Abra a pasta do paciente novamente.' };
     Object.assign(dados, base.dados);
+  } else {
+    const camposClinicos = modelo.topicos.flatMap(t => t.subtopicos || [])
+      .filter(c => !fichaSubtopico_ehDadoPaciente(c.titulo));
+    const base = anteriores.sort((a, b) => Date.parse(b.criadoEm) - Date.parse(a.criadoEm))
+      .find(f => camposClinicos.some(c => String(f.dados?.[c.id] ?? '').trim()));
+    if (base) {
+      for (const campo of camposClinicos) {
+        if (Object.hasOwn(base.dados, campo.id)) dados[campo.id] = base.dados[campo.id];
+      }
+    }
   }
   // Nome, idade e sexo são copiados do cadastro do paciente.
   fichaClinica_aplicarDadosPaciente(dados, modelo, paciente);
